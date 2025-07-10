@@ -31,5 +31,8 @@ jobs:
     - name: Send greeting
       run: echo "Hello ${{ inputs.name }}"
 
+    - name: Check out code
+      uses: actions/checkout@v2
+      
     - name: actions-cloc
       uses: maxfie1d/actions-cloc@v1
