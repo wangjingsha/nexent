@@ -1,24 +1,22 @@
-name: GitHub Stats Update
+name: Update Top Contributors
 on:
-  workflow_dispatch:      # Allows manual trigger
+    workflow_dispatch:      # Allow manual trigger
 
 jobs:
-  update-stats:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v2
-        with:
-          token: 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
-          
-      - name: Generate Stats
-        uses: VatsalSy/commits-readme-stats@v2.5
-        with:
-          GH_COMMIT_TOKEN: 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
-          SHOW_COMMIT: true
-          SHOW_DAYS_OF_WEEK: true
-          COMMIT_MESSAGE: 'docs(stats): update github stats'
-          COMMIT_BY_ME: false
-          COMMIT_USERNAME: 'github-actions[bot]'
-          COMMIT_EMAIL: '41898282+github-actions[bot]@users.noreply.github.com'
+    update-contributors:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Generate Top Contributors
+                uses: ishakhorski/top-contributors-action@v2
+                with:
+                    token: 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
+
+            - name: Commit and push if changed
+                run: |
+                    git config --local user.email "action@github.com"
+                    git config --local user.name "GitHub Action"
+                    git add CONTRIBUTORS.md
+                    git commit -m "Update top contributors" || exit 0
+                    git push
