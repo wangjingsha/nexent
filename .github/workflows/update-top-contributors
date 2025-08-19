@@ -1,8 +1,6 @@
 name: Update Top Contributors
 
 on:
-    schedule:
-        - cron: '0 0 * * 0'  # Run weekly on Sunday at midnight
     workflow_dispatch:      # Allow manual trigger
 
 jobs:
@@ -14,7 +12,7 @@ jobs:
             - name: Generate Top Contributors
                 uses: ishakhorski/top-contributors-action@v2
                 with:
-                    token: ${{ secrets.GITHUB_TOKEN }}
+                    token: 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
 
             - name: Commit and push if changed
                 run: |
