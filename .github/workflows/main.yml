@@ -11,6 +11,8 @@ on:
     #        │ │ │ │ ┌────── day (week)
     - cron: "0 0 1 * *"
 
+  workflow_dispatch:      # Allow manual trigger
+
 jobs:
   member-contribution-report:
     runs-on: ubuntu-latest
