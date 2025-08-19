@@ -1,0 +1,25 @@
+name: Update Top Contributors
+
+on:
+    schedule:
+        - cron: '0 0 * * 0'  # Run weekly on Sunday at midnight
+    workflow_dispatch:      # Allow manual trigger
+
+jobs:
+    update-contributors:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Generate Top Contributors
+                uses: ishakhorski/top-contributors-action@v2
+                with:
+                    token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Commit and push if changed
+                run: |
+                    git config --local user.email "action@github.com"
+                    git config --local user.name "GitHub Action"
+                    git add CONTRIBUTORS.md
+                    git commit -m "Update top contributors" || exit 0
+                    git push
