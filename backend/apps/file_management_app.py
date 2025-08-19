@@ -13,12 +13,13 @@ from fastapi import UploadFile, File, HTTPException, Form, APIRouter, Query, Pat
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
 from consts.model import ProcessParams
-from consts.const import MAX_CONCURRENT_UPLOADS, UPLOAD_FOLDER
+from consts.const import MAX_CONCURRENT_UPLOADS, UPLOAD_FOLDER, DATA_PROCESS_SERVICE
 from utils.file_management_utils import save_upload_file, trigger_data_process
 from utils.attachment_utils import convert_image_to_text, convert_long_text_to_text
 from database.attachment_db import (
     upload_fileobj, delete_file, get_file_url, list_files, get_file_stream, get_content_type
 )
+from agents.preprocess_manager import preprocess_manager
 
 logger = logging.getLogger("file_management_app")
 
@@ -150,7 +151,8 @@ async def process_files(
         files: List[dict] = Body(..., description="List of file details to process, including path_or_url and filename"),
         chunking_strategy: Optional[str] = Body("basic"),
         index_name: str = Body(...),
-        destination: str = Body(...)
+        destination: str = Body(...),
+        authorization: Optional[str] = Header(None)
 ):
     """
     Trigger data processing for a list of uploaded files.
@@ -162,7 +164,8 @@ async def process_files(
     process_params = ProcessParams(
         chunking_strategy=chunking_strategy,
         source_type=destination,
-        index_name=index_name
+        index_name=index_name,
+        authorization=authorization
     )
 
     process_result = await trigger_data_process(files, process_params)
@@ -415,58 +418,82 @@ async def agent_preprocess_api(request: Request, query: str = Form(...), files: 
                     "error": str(e)
                 })
 
+        # Generate unique task ID for this preprocess operation
+        import uuid
+        task_id = str(uuid.uuid4())
+        conversation_id = request.query_params.get("conversation_id")
+        if conversation_id:
+            conversation_id = int(conversation_id)
+        else:
+            conversation_id = -1  # Default for cases without conversation_id
+
         async def generate():
             file_descriptions = []
             total_files = len(file_cache)
 
-            for index, file_data in enumerate(file_cache):
-                progress = int((index / total_files) * 100)
+            # Create and register the preprocess task
+            task = asyncio.current_task()
+            if task:
+                preprocess_manager.register_preprocess_task(task_id, conversation_id, task)
 
-                progress_message = json.dumps({
-                    "type": "progress",
-                    "progress": progress,
-                    "message": f"Parsing file {index + 1}/{total_files}: {file_data['filename']}"
+            try:
+                for index, file_data in enumerate(file_cache):
+                    # Check if task should stop
+                    if task and task.done():
+                        logger.info(f"Preprocess task {task_id} was cancelled")
+                        break
+
+                    progress = int((index / total_files) * 100)
+
+                    progress_message = json.dumps({
+                        "type": "progress",
+                        "progress": progress,
+                        "message": f"Parsing file {index + 1}/{total_files}: {file_data['filename']}"
+                    }, ensure_ascii=False)
+                    yield f"data: {progress_message}\n\n"
+                    await asyncio.sleep(0.1)
+
+                    try:
+                        # Check if file already has an error
+                        if "error" in file_data:
+                            raise Exception(file_data["error"])
+
+                        if file_data["ext"] in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
+                            description = await process_image_file(query, file_data["filename"], file_data["content"], tenant_id, language)
+                        else:
+                            description = await process_text_file(query, file_data["filename"], file_data["content"], tenant_id, language)
+                        file_descriptions.append(description)
+
+                        # Send processing result for each file
+                        file_message = json.dumps({
+                            "type": "file_processed",
+                            "filename": file_data["filename"],
+                            "description": description
+                        }, ensure_ascii=False)
+                        yield f"data: {file_message}\n\n"
+                        await asyncio.sleep(0.1)
+                    except Exception as e:
+                        logger.exception(f"Error parsing file {file_data['filename']}: {str(e)}")
+                        error_description = f"Error parsing file {file_data['filename']}: {str(e)}"
+                        file_descriptions.append(error_description)
+                        error_message = json.dumps({
+                            "type": "error",
+                            "filename": file_data["filename"],
+                            "message": error_description
+                        }, ensure_ascii=False)
+                        yield f"data: {error_message}\n\n"
+                        await asyncio.sleep(0.1)
+
+                # Send completion message
+                complete_message = json.dumps({
+                    "type": "complete",
+                    "progress": 100,
+                    "final_query": query
                 }, ensure_ascii=False)
-                yield f"data: {progress_message}\n\n"
-                await asyncio.sleep(0.1)
-
-                try:
-                    # Check if file already has an error
-                    if "error" in file_data:
-                        raise Exception(file_data["error"])
-
-                    if file_data["ext"] in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
-                        description = await process_image_file(query, file_data["filename"], file_data["content"], tenant_id, language)
-                    else:
-                        description = await process_text_file(query, file_data["filename"], file_data["content"], tenant_id, language)
-                    file_descriptions.append(description)
-
-                    # Send processing result for each file
-                    file_message = json.dumps({
-                        "type": "file_processed",
-                        "filename": file_data["filename"],
-                        "description": description
-                    }, ensure_ascii=False)
-                    yield f"data: {file_message}\n\n"
-                    await asyncio.sleep(0.1)
-                except Exception as e:
-                    error_description = f"Error parsing file {file_data['filename']}: {str(e)}"
-                    file_descriptions.append(error_description)
-                    error_message = json.dumps({
-                        "type": "error",
-                        "filename": file_data["filename"],
-                        "message": error_description
-                    }, ensure_ascii=False)
-                    yield f"data: {error_message}\n\n"
-                    await asyncio.sleep(0.1)
-
-            # Send completion message
-            complete_message = json.dumps({
-                "type": "complete",
-                "progress": 100,
-                "final_query": query
-            }, ensure_ascii=False)
-            yield f"data: {complete_message}\n\n"
+                yield f"data: {complete_message}\n\n"
+            finally:
+                # Always unregister the task
+                preprocess_manager.unregister_preprocess_task(task_id)
 
         return StreamingResponse(
             generate(),
@@ -495,7 +522,7 @@ async def process_text_file(query, filename, file_content, tenant_id: str, langu
     Process text file, convert to text using external API
     """
     # file_content is byte data, need to send to API through file upload
-    data_process_service_url = os.environ.get('DATA_PROCESS_SERVICE')
+    data_process_service_url = DATA_PROCESS_SERVICE
     api_url = f"{data_process_service_url}/tasks/process_text_file"
     logger.info(f"Processing text file {filename} with API: {api_url}")
 
@@ -514,7 +541,7 @@ async def process_text_file(query, filename, file_content, tenant_id: str, langu
         if response.status_code == 200:
             result = response.json()
             raw_text = result.get("text", "")
-            logger.info(f"File processed successfully: {raw_text[:100]}...")
+            logger.info(f"File processed successfully: {raw_text[:200]}...{raw_text[-200:]}...， length: {len(raw_text)}")
         else:
             error_detail = response.json().get('detail', '未知错误') if response.headers.get('content-type', '').startswith('application/json') else response.text
             logger.error(f"File processing failed (status code: {response.status_code}): {error_detail}")

@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from typing import Optional
 
 from consts.model import GlobalConfig
+from consts.const import DEFAULT_APP_DESCRIPTION_ZH, DEFAULT_APP_DESCRIPTION_EN, DEFAULT_APP_NAME_EN, DEFAULT_APP_NAME_ZH, DEFAULT_APP_ICON_URL
 from utils.config_utils import config_manager, get_env_key, safe_value, tenant_config_manager, \
     get_model_name_from_config
 from utils.auth_utils import get_current_user_id, get_current_user_info
@@ -14,7 +15,6 @@ router = APIRouter(prefix="/config")
 
 # Get logger instance
 logger = logging.getLogger("config_sync_app")
-
 
 def handle_model_config(tenant_id: str, user_id: str, config_key: str, model_id: int, tenant_config_dict: dict) -> None:
     """
@@ -51,6 +51,7 @@ def handle_model_config(tenant_id: str, user_id: str, config_key: str, model_id:
 async def save_config(config: GlobalConfig, authorization: Optional[str] = Header(None)):
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        logger.info(f"Start to save config, user_id: {user_id}, tenant_id: {tenant_id}")
         config_dict = config.model_dump(exclude_none=False)
         env_config = {}
 
@@ -70,7 +71,8 @@ async def save_config(config: GlobalConfig, authorization: Optional[str] = Heade
                 tenant_config_manager.delete_single_config(tenant_id, env_key)
                 tenant_config_manager.set_single_config(user_id, tenant_id, env_key, safe_value(value))
             else:
-                tenant_config_manager.set_single_config(user_id, tenant_id, env_key, safe_value(value))
+                if env_config[env_key] not in [DEFAULT_APP_NAME_ZH, DEFAULT_APP_NAME_EN, DEFAULT_APP_DESCRIPTION_ZH, DEFAULT_APP_DESCRIPTION_EN]:
+                    tenant_config_manager.set_single_config(user_id, tenant_id, env_key, safe_value(value))
 
         # Process model configuration
         for model_type, model_config in config_dict.get("models", {}).items():
@@ -125,7 +127,7 @@ async def load_config(authorization: Optional[str] = Header(None), request: Requ
         # Build configuration object
         # TODO: Clean up the default values
         user_id, tenant_id, language = get_current_user_info(authorization, request)
-        
+
         llm_model_name = tenant_config_manager.get_model_config("LLM_ID", tenant_id=tenant_id)
         llm_secondary_model_name = tenant_config_manager.get_model_config("LLM_SECONDARY_ID", tenant_id=tenant_id)
         embedding_model_name = tenant_config_manager.get_model_config("EMBEDDING_ID", tenant_id=tenant_id)
@@ -135,15 +137,15 @@ async def load_config(authorization: Optional[str] = Header(None), request: Requ
         stt_model_name = tenant_config_manager.get_model_config("STT_ID", tenant_id=tenant_id)
         tts_model_name = tenant_config_manager.get_model_config("TTS_ID", tenant_id=tenant_id)
 
-        default_app_name = "Nexent 智能体" if language == "zh" else "Nexent Agent"
-        default_app_description = "Nexent 是一个开源智能体SDK和平台，能够将单一提示词转化为完整的多模态服务 —— 无需编排，无需复杂拖拉拽。基于 MCP 工具生态系统构建，Nexent 提供灵活的模型集成、可扩展的数据处理和强大的知识库管理。我们的目标很简单：将数据、模型和工具整合到一个智能中心中，让任何人都能轻松地将 Nexent 集成到项目中，使日常工作流程更智能、更互联。" if language == "zh" else "Nexent is an open-source agent SDK and platform, which can convert a single prompt into a complete multi-modal service - without orchestration, without complex drag-and-drop. Built on the MCP tool ecosystem, Nexent provides flexible model integration, scalable data processing, and powerful knowledge base management. Our goal is simple: to integrate data, models, and tools into a central intelligence hub, allowing anyone to easily integrate Nexent into their projects, making daily workflows smarter and more interconnected."
+        default_app_name = DEFAULT_APP_NAME_ZH if language == "zh" else DEFAULT_APP_NAME_EN
+        default_app_description = DEFAULT_APP_DESCRIPTION_ZH if language == "zh" else DEFAULT_APP_DESCRIPTION_EN
         config = {
             "app": {
                 "name": tenant_config_manager.get_app_config("APP_NAME", tenant_id=tenant_id) or default_app_name,
                 "description": tenant_config_manager.get_app_config("APP_DESCRIPTION", tenant_id=tenant_id) or default_app_description,
                 "icon": {
                     "type": tenant_config_manager.get_app_config("ICON_TYPE", tenant_id=tenant_id) or "preset",
-                    "avatarUri": tenant_config_manager.get_app_config("AVATAR_URI", tenant_id=tenant_id) or "",
+                    "avatarUri": tenant_config_manager.get_app_config("AVATAR_URI", tenant_id=tenant_id) or DEFAULT_APP_ICON_URL,
                     "customUrl": tenant_config_manager.get_app_config("CUSTOM_ICON_URL", tenant_id=tenant_id) or ""
                 }
             },

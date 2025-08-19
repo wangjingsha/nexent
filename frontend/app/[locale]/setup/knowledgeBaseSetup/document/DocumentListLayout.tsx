@@ -1,12 +1,13 @@
-import React, { useState } from 'react'
+import React, { useState, useRef, forwardRef, useImperativeHandle } from 'react'
 import { Document } from '@/types/knowledgeBase'
 import DocumentStatus from './DocumentStatus'
 import { InfoCircleFilled } from '@ant-design/icons'
 import UploadArea from '../components/UploadArea'
-import { formatFileSize, formatDateTime } from '@/lib/utils'
+import { formatFileSize, formatDateTime, sortByStatusAndDate } from '@/lib/utils'
 import { Input, Button, Tooltip } from 'antd'
 import { useKnowledgeBaseContext } from '../knowledgeBase/KnowledgeBaseContext'
-import { message } from 'antd'
+import { useDocumentContext } from './DocumentContext'
+import { App } from 'antd'
 import knowledgeBaseService from '@/services/knowledgeBaseService'
 import { useTranslation } from 'react-i18next'
 
@@ -56,71 +57,103 @@ export const LAYOUT = {
   ACTION_TEXT: 'text-red-500 hover:text-red-700 font-medium text-xs' // Action button text style
 }
 
-export interface DocumentListLayoutProps {
-  sortedDocuments: Document[]
-  knowledgeBaseName: string
-  loading: boolean
-  isInitialLoad: boolean
-  modelMismatch: boolean
-  isCreatingMode: boolean
-  isUploading: boolean
-  nameLockedAfterUpload: boolean
-  hasDocuments: boolean
-  containerHeight: string
-  contentHeight: string
-  titleBarHeight: string
-  uploadHeight: string
-  
-  // Functions
-  getFileIcon: (type: string) => string
-  getMismatchInfo: () => string
-  onNameChange?: (name: string) => void
+interface DocumentListProps {
+  documents: Document[]
   onDelete: (id: string) => void
+  knowledgeBaseName?: string // 当前知识库名称，用于显示标题
+  modelMismatch?: boolean // 模型不匹配标志
+  currentModel?: string // 当前使用的模型
+  knowledgeBaseModel?: string // 知识库使用的模型
+  embeddingModelInfo?: string // 嵌入模型信息
+  containerHeight?: string // 容器总高度
+  isCreatingMode?: boolean // 是否处于创建模式
+  onNameChange?: (name: string) => void // 知识库名称变更
+  hasDocuments?: boolean // 是否已经有文档上传
   
-  // Upload related props
-  uploadAreaRef: React.RefObject<any>
-  isDragging: boolean
+  // 上传相关的props
+  isDragging?: boolean
   onDragOver?: (e: React.DragEvent) => void
   onDragLeave?: (e: React.DragEvent) => void
   onDrop?: (e: React.DragEvent) => void
   onFileSelect: (files: File[]) => void
-  selectedFiles: File[]
-  handleUpload: () => void
-  uploadUrl: string
+  onUpload?: () => void
+  isUploading?: boolean
+  uploadUrl?: string
 }
 
-const DocumentListLayout: React.FC<DocumentListLayoutProps> = ({
-  sortedDocuments,
-  knowledgeBaseName,
-  loading,
-  isInitialLoad,
-  modelMismatch,
-  isCreatingMode,
-  isUploading,
-  nameLockedAfterUpload,
-  hasDocuments,
-  containerHeight,
-  contentHeight,
-  titleBarHeight,
-  uploadHeight,
-  
-  // Functions
-  getFileIcon,
-  getMismatchInfo,
-  onNameChange,
+export interface DocumentListRef {
+  uppy: any;
+}
+
+const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(({
+  documents,
   onDelete,
+  knowledgeBaseName = '',
+  modelMismatch = false,
+  currentModel = '',
+  knowledgeBaseModel = '',
+  embeddingModelInfo = '',
+  containerHeight = '57vh', // 默认整体容器高度
+  isCreatingMode = false,
+  onNameChange,
+  hasDocuments = false,
   
-  // Upload related props
-  uploadAreaRef,
-  isDragging,
+  // 上传相关props
+  isDragging = false,
   onDragOver,
   onDragLeave,
   onDrop,
   onFileSelect,
-  selectedFiles,
-  handleUpload,
-  uploadUrl
-}) => {
+  onUpload,
+  isUploading = false,
+  uploadUrl = '/api/upload'
+}, ref) => {
+  const { message } = App.useApp();
+  const uploadAreaRef = useRef<any>(null);
+  const { state: docState } = useDocumentContext();
+  
+  // 使用固定高度而不是百分比
+  const titleBarHeight = UI_CONFIG.TITLE_BAR_HEIGHT;
+  const uploadHeight = UI_CONFIG.UPLOAD_COMPONENT_HEIGHT;
+  
+  // 计算文档列表区域高度 = 总高度 - 标题栏高度 - 上传区域高度
+  const contentHeight = `calc(${containerHeight} - ${titleBarHeight} - ${uploadHeight})`;
+
+  // 按状态和日期排序的文档列表
+  const sortedDocuments = sortByStatusAndDate(documents);
+
+  // 获取文件图标
+  const getFileIcon = (type: string): string => {
+    switch (type.toLowerCase()) {
+      case 'pdf':
+        return '📄'
+      case 'word':
+        return '📝'
+      case 'excel':
+        return '📊'
+      case 'powerpoint':
+        return '📑'
+      default:
+        return '📃'
+    }
+  }
+
+  // 构建模型不匹配提示信息
+  const getMismatchInfo = (): string => {
+    if (embeddingModelInfo) return embeddingModelInfo;
+    if (currentModel && knowledgeBaseModel) {
+      return t('document.modelMismatch.withModels', {
+        currentModel,
+        knowledgeBaseModel
+      });
+    }
+    return t('document.modelMismatch.general');
+  }
+
+  // 暴露 uppy 实例给父组件
+  useImperativeHandle(ref, () => ({
+    uppy: uploadAreaRef.current?.uppy
+  }));
   const [showDetail, setShowDetail] = React.useState(false);
   const [summary, setSummary] = useState('');
   const [isSummarizing, setIsSummarizing] = useState(false);
@@ -198,18 +231,19 @@ const DocumentListLayout: React.FC<DocumentListLayoutProps> = ({
       message.error(errorMessage);
     } finally {
       setIsSaving(false);
+      setShowDetail(false);
     }
   };
 
   // Refactored: Style is embedded within the component
   return (
-    <div className="flex flex-col w-full bg-white border border-gray-200 rounded-md shadow-sm h-full" style={{ height: containerHeight }}>
+    <div className={`flex flex-col w-full bg-white border border-gray-200 rounded-md shadow-sm h-full h-[${containerHeight}]`}>
       {/* Title bar */}
-      <div className={`${LAYOUT.KB_HEADER_PADDING} border-b border-gray-200 flex-shrink-0 flex items-center`} style={{ height: titleBarHeight }}>
+      <div className={`${LAYOUT.KB_HEADER_PADDING} border-b border-gray-200 flex-shrink-0 flex items-center h-[${titleBarHeight}]`}>
         <div className="flex items-center justify-between w-full">
           <div className="flex items-center">
             {isCreatingMode ? (
-              nameLockedAfterUpload ? (
+              false ? (
                 <div className="flex items-center">
                   <span className="text-blue-600 mr-2">📚</span>
                   <h3 className={`${LAYOUT.KB_TITLE_MARGIN} ${LAYOUT.KB_TITLE_SIZE} font-semibold text-gray-800`}>
@@ -226,17 +260,11 @@ const DocumentListLayout: React.FC<DocumentListLayoutProps> = ({
                   value={knowledgeBaseName}
                   onChange={(e) => onNameChange && onNameChange(e.target.value)}
                   placeholder={t('document.input.knowledgeBaseName')}
-                  className={`${LAYOUT.KB_TITLE_MARGIN}`}
+                  className={`${LAYOUT.KB_TITLE_MARGIN} w-[320px] font-medium my-[2px]`}
                   size="large"
-                  style={{ 
-                    width: '320px', 
-                    fontWeight: 500,
-                    marginTop: '2px',
-                    marginBottom: '2px'
-                  }}
                   prefix={<span className="text-blue-600">📚</span>}
                   autoFocus
-                  disabled={hasDocuments || isUploading || nameLockedAfterUpload || loading} // Disable editing name if there are documents or uploading
+                  disabled={hasDocuments || isUploading || docState.isLoadingDocuments} // Disable editing name if there are documents or uploading
                 />
               )
             ) : (
@@ -254,23 +282,23 @@ const DocumentListLayout: React.FC<DocumentListLayoutProps> = ({
           </div>
           {/* 右侧：详细内容 */}
           {!isCreatingMode && (
-            <Tooltip 
-              title={summary || t('document.summary.empty')} 
-              placement="left"
-              mouseEnterDelay={0.5}
-            >
-              <Button type="primary" onClick={() => setShowDetail(true)}>{t('document.button.details')}</Button>
-            </Tooltip>
+            <Button type="primary" onClick={() => setShowDetail(true)}>{t('document.button.details')}</Button>
           )}
         </div>
       </div>
 
       {/* Document list */}
-      <div className="p-2 overflow-auto flex-grow" style={{ height: contentHeight }}>
+      <div
+        className="p-2 overflow-auto flex-grow"
+        onDragOver={(e) => { if (!isCreatingMode && knowledgeBaseName) { return; } e.preventDefault(); e.stopPropagation(); }}
+        onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); }}
+      >
         {showDetail ? (
-          <div style={{ padding: '16px 32px', height: '100%', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <span style={{ fontWeight: 700, fontSize: 18 }}>{t('document.summary.title')}</span>
+          <div className="px-8 py-4 h-full flex flex-col">
+            <div className="flex items-center justify-between mb-5">
+              <span className="font-bold text-lg">{t('document.summary.title')}</span>
               <Button
                 type="default"
                 onClick={handleAutoSummary}
@@ -283,17 +311,9 @@ const DocumentListLayout: React.FC<DocumentListLayoutProps> = ({
             <Input.TextArea
               value={summary}
               onChange={(e) => setSummary(e.target.value)}
-              style={{
-                flex: 1,
-                minHeight: 0,
-                marginBottom: 20,
-                resize: 'none',
-                fontSize: 18,
-                lineHeight: 1.7,
-                padding: 20
-              }}
+              className="flex-1 min-h-0 mb-5 resize-none text-lg leading-[1.7] p-5"
             />
-            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+            <div className="flex gap-3 justify-end">
               <Button
                 type="primary"
                 size="large"
@@ -307,7 +327,7 @@ const DocumentListLayout: React.FC<DocumentListLayoutProps> = ({
             </div>
           </div>
         ) : (
-          loading? (
+          docState.isLoadingDocuments? (
             <div className="flex items-center justify-center h-full border border-gray-200 rounded-md">
               <div className="text-center">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
@@ -317,8 +337,8 @@ const DocumentListLayout: React.FC<DocumentListLayoutProps> = ({
           ) : isCreatingMode ? (
             <div className="flex items-center justify-center border border-gray-200 rounded-md h-full">
               <div className="text-center p-6">
-                <div className="mb-4">
-                  <InfoCircleFilled style={{ fontSize: 36, color: '#1677ff' }} />
+                <div className="mb-4 text-blue-600 text-[36px]">
+                  <InfoCircleFilled />
                 </div>
                 <h3 className="text-lg font-medium text-gray-800 mb-2">{t('document.title.createNew')}</h3>
                 <p className="text-gray-500 text-sm max-w-md">
@@ -331,19 +351,19 @@ const DocumentListLayout: React.FC<DocumentListLayoutProps> = ({
               <table className="min-w-full bg-white">
                 <thead className={`${LAYOUT.TABLE_HEADER_BG} sticky top-0 z-10`}>
                   <tr>
-                    <th className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT}`} style={{ width: COLUMN_WIDTHS.NAME }}>
+                    <th className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.NAME}]`}>
                       {t('document.table.header.name')}
                     </th>
-                    <th className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT}`} style={{ width: COLUMN_WIDTHS.STATUS }}>
+                    <th className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.STATUS}]`}>
                       {t('document.table.header.status')}
                     </th>
-                    <th className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT}`} style={{ width: COLUMN_WIDTHS.SIZE }}>
+                    <th className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.SIZE}]`}>
                       {t('document.table.header.size')}
                     </th>
-                    <th className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT}`} style={{ width: COLUMN_WIDTHS.DATE }}>
+                    <th className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.DATE}]`}>
                       {t('document.table.header.date')}
                     </th>
-                    <th className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT}`} style={{ width: COLUMN_WIDTHS.ACTION }}>
+                    <th className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.ACTION}]`}>
                       {t('document.table.header.action')}
                     </th>
                   </tr>
@@ -357,13 +377,7 @@ const DocumentListLayout: React.FC<DocumentListLayoutProps> = ({
                             {getFileIcon(doc.type)}
                           </span>
                           <span
-                            className={`${LAYOUT.TEXT_SIZE} font-medium text-gray-800 truncate`}
-                            style={{
-                              maxWidth: DOCUMENT_NAME_CONFIG.MAX_WIDTH,
-                              textOverflow: DOCUMENT_NAME_CONFIG.TEXT_OVERFLOW,
-                              whiteSpace: DOCUMENT_NAME_CONFIG.WHITE_SPACE,
-                              overflow: DOCUMENT_NAME_CONFIG.OVERFLOW
-                            }}
+                            className={`${LAYOUT.TEXT_SIZE} font-medium text-gray-800 truncate max-w-[${DOCUMENT_NAME_CONFIG.MAX_WIDTH}] whitespace-${DOCUMENT_NAME_CONFIG.WHITE_SPACE} overflow-${DOCUMENT_NAME_CONFIG.OVERFLOW} text-${DOCUMENT_NAME_CONFIG.TEXT_OVERFLOW}`}
                             title={doc.name}
                           >
                             {doc.name}
@@ -412,7 +426,7 @@ const DocumentListLayout: React.FC<DocumentListLayoutProps> = ({
           key={isCreatingMode ? `create-${knowledgeBaseName}` : `view-${knowledgeBaseName}`}
           ref={uploadAreaRef}
           onFileSelect={onFileSelect}
-          onUpload={handleUpload}
+          onUpload={onUpload || (() => {})}
           isUploading={isUploading}
           isDragging={isDragging}
           onDragOver={onDragOver}
@@ -429,6 +443,6 @@ const DocumentListLayout: React.FC<DocumentListLayoutProps> = ({
       )}
     </div>
   )
-}
+});
 
-export default DocumentListLayout 
+export default DocumentListContainer 

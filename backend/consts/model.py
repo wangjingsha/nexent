@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Optional, Any, List, Dict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 
 from nexent.core.agents.agent_model import ToolConfig
 
@@ -25,6 +25,45 @@ class ModelConnectStatusEnum(Enum):
             return cls.NOT_DETECTED.value
         return status
 
+# Request models for user authentication
+STATUS_CODES = {
+    "SUCCESS": 200,
+    # 客户端错误状态码
+    "USER_EXISTS": 1001,
+    "INVALID_CREDENTIALS": 1002,
+    "TOKEN_EXPIRED": 1003,
+    "UNAUTHORIZED": 1004,
+    "SERVER_ERROR": 1005,
+    "INVALID_INPUT": 1006,
+    "AUTH_SERVICE_UNAVAILABLE": 1007,
+}
+
+# 用户认证相关请求模型
+class UserSignUpRequest(BaseModel):
+    """User registration request model"""
+    email: EmailStr
+    password: str = Field(..., min_length=6)
+    is_admin: Optional[bool] = False
+    invite_code: Optional[str] = None
+
+class UserSignInRequest(BaseModel):
+    """User login request model"""
+    email: EmailStr
+    password: str
+
+class UserUpdateRequest(BaseModel):
+    """User information update request model"""
+    email: Optional[EmailStr] = None
+    password: Optional[str] = Field(None, min_length=6)
+    role: Optional[str] = None
+
+
+# Response models for user management
+class ServiceResponse(BaseModel):
+    code: int
+    message: str
+    data: Optional[Any] = None
+
 
 # Response models for model management
 class ModelResponse(BaseModel):
@@ -43,6 +82,20 @@ class ModelRequest(BaseModel):
     used_token: Optional[int] = 0
     display_name: Optional[str] = ''
     connect_status: Optional[str] = ''
+
+
+class ProviderModelRequest(BaseModel):
+    provider: str
+    model_type: str
+    api_key: Optional[str] = ''
+
+
+class BatchCreateModelsRequest(BaseModel):
+    api_key: str
+    models: List[Dict]
+    provider: str
+    type: str
+    max_tokens: int
 
 
 # Configuration models
@@ -165,24 +218,6 @@ class SimpleTasksListResponse(BaseModel):
     tasks: List[SimpleTaskStatusResponse]
 
 
-class FileInfo(BaseModel):
-    path_or_url: str = Field(..., description="Document source path or URL")
-    file: str = Field(..., description="File name or identifier")
-    file_size: Optional[int] = Field(None, description="Size of the file in bytes")
-    create_time: Optional[str] = Field(None, description="Creation time of the file")
-
-
-class IndexInfo(BaseModel):
-    base_info: Dict[str, Any]
-    search_performance: Dict[str, Any]
-    fields: List[str]
-    doc_count: int
-    chunk_count: int
-    process_source: str
-    embedding_model: Optional[str] = Field(None, description="Embedding model used")
-    files: Optional[List[FileInfo]] = Field(None, description="List of files in the index")
-
-
 class IndexingResponse(BaseModel):
     success: bool
     message: str
@@ -190,26 +225,12 @@ class IndexingResponse(BaseModel):
     total_submitted: int
 
 
-class DocumentResponse(BaseModel):
-    id: str
-    title: str
-    filename: str
-    path_or_url: str
-    language: Optional[str] = None
-    author: Optional[str] = None
-    date: Optional[str] = None
-    content: str
-    process_source: str
-    embedding_model_name: Optional[str] = None
-    file_size: Optional[int] = None
-    create_time: Optional[str] = None
-    score: Optional[float] = None
-
 # Request models
 class ProcessParams(BaseModel):
     chunking_strategy: Optional[str] = "basic"
     source_type: str
     index_name: str
+    authorization: Optional[str] = None
 
 
 class OpinionRequest(BaseModel):
@@ -238,12 +259,15 @@ class FineTunePromptRequest(BaseModel):
 class AgentInfoRequest(BaseModel):
     agent_id: int
     name: Optional[str] = None
+    display_name: Optional[str] = None
     description: Optional[str] = None
     business_description: Optional[str] = None
     model_name: Optional[str] = None
     max_steps: Optional[int] = None
     provide_run_summary: Optional[bool] = None
-    prompt: Optional[str] = None
+    duty_prompt: Optional[str] = None
+    constraint_prompt: Optional[str] = None
+    few_shots_prompt: Optional[str] = None
     enabled: Optional[bool] = None
 
 
@@ -266,6 +290,7 @@ class ToolInstanceSearchRequest(BaseModel):
 class ToolSourceEnum(Enum):
     LOCAL = "local"
     MCP = "mcp"
+    LANGCHAIN = "langchain"
 
 
 class ToolInfo(BaseModel):
@@ -276,6 +301,7 @@ class ToolInfo(BaseModel):
     inputs: str
     output_type: str
     class_name: str
+    usage: Optional[str]
 
 
 # used in Knowledge Summary request
@@ -289,18 +315,56 @@ class MessageIdRequest(BaseModel):
 
 
 class ExportAndImportAgentInfo(BaseModel):
+    agent_id: int
     name: str
     description: str
     business_description: str
     model_name: str
     max_steps: int
     provide_run_summary: bool
-    prompt: str
+    duty_prompt: Optional[str] = None
+    constraint_prompt: Optional[str] = None
+    few_shots_prompt: Optional[str] = None
     enabled: bool
     tools: List[ToolConfig]
-    managed_agents: List
+    managed_agents: List[int]
+
+class ExportAndImportDataFormat(BaseModel):
+    agent_id: int
+    agent_info: Dict[str, ExportAndImportAgentInfo]
 
 
 class AgentImportRequest(BaseModel):
-    agent_id: int
-    agent_info: ExportAndImportAgentInfo
+    agent_info: ExportAndImportDataFormat
+
+
+class ConvertStateRequest(BaseModel):
+    """Request schema for /tasks/convert_state endpoint"""
+    process_state: str = ""
+    forward_state: str = ""
+
+
+class ConvertStateResponse(BaseModel):
+    """Response schema for /tasks/convert_state endpoint"""
+    state: str
+
+
+# ---------------------------------------------------------------------------
+# Memory Feature Data Models (Missing previously)
+# ---------------------------------------------------------------------------
+
+class MemoryAgentShareMode(str, Enum):
+    """Memory sharing mode for agent-level memory.
+
+    always: Agent memories are always shared with others.
+    ask:    Ask user every time whether to share.
+    never:  Never share agent memories.
+    """
+
+    ALWAYS = "always"
+    ASK = "ask"
+    NEVER = "never"
+
+    @classmethod
+    def default(cls) -> "MemoryAgentShareMode":
+        return cls.NEVER

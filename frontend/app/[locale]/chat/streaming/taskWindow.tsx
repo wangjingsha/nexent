@@ -1,8 +1,8 @@
-import { useRef, useEffect, useState, useMemo } from "react"
+import { useRef, useEffect, useState } from "react"
 import { ScrollArea } from "@/components/ui/scrollArea"
 import { ChatMessageType, TaskMessageType } from "@/types/chat"
 import { MarkdownRenderer } from '@/components/ui/markdownRenderer'
-import { Globe, Search, Zap, Bot, Code, FileText, HelpCircle, ChevronRight } from "lucide-react"
+import { Globe, Search, Zap, Bot, Code, FileText, HelpCircle, ChevronRight, Wrench } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useChatTaskMessage } from "@/hooks/useChatTaskMessage"
 import { useTranslation } from "react-i18next"
@@ -16,7 +16,7 @@ const iconMap: Record<string, React.ReactNode> = {
   "globe": <Globe size={16} className="mr-2" color="#4b5563" />,
   "zap": <Zap size={16} className="mr-2" color="#4b5563" />,
   "knowledge": <FileText size={16} className="mr-2" color="#4b5563" />,
-  "default": <HelpCircle size={16} className="mr-2" color="#4b5563" /> // Default icon
+  "default": <Wrench size={16} className="mr-2" color="#4b5563" /> // Default icon
 };
 
 // Define the type for card items
@@ -39,7 +39,9 @@ const messageHandlers: MessageHandler[] = [
     canHandle: (message) => 
       message.type === "agent_new_run" || 
       message.type === "generating_code" ||
-      message.type === "executing",
+      message.type === "executing" ||
+      message.type === "model_output_thinking" ||
+      message.type === "model_output_deep_thinking",
     render: (message, _t) => (
         <div style={{
           fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
@@ -571,7 +573,7 @@ const messageHandlers: MessageHandler[] = [
         fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
         fontSize: "0.875rem",
         lineHeight: 1.5,
-        color: "#1f2937",
+        color: message.subType === "deep_thinking" ? "#6b7280" : "#1f2937",
         fontWeight: 400
       }}>
         <MarkdownRenderer content={message.content} className="task-message-content" />
@@ -643,7 +645,7 @@ export function TaskWindow({
   const { t } = useTranslation('common');
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const [autoScroll, setAutoScroll] = useState(true)
-  const [isExpanded, setIsExpanded] = useState(isStreaming)
+  const [isExpanded, setIsExpanded] = useState(true) // default expand task details interface
   const [contentHeight, setContentHeight] = useState(0)
   const contentRef = useRef<HTMLDivElement>(null)
   

@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Union, Optional
 
 import requests
+import asyncio
 
 
 class BaseEmbedding(ABC):
@@ -39,13 +40,13 @@ class BaseEmbedding(ABC):
         pass
 
     @abstractmethod
-    def check_connectivity(self, timeout: float = 5.0) -> bool:
+    async def dimension_check(self, timeout: float = 5.0) -> List[List[float]]:
         """
         Test the connectivity to the embedding API, supporting timeout detection.
-        
+
         Args:
             timeout: Timeout in seconds
-            
+
         Returns:
             bool: Returns True if the connection is successful, False if it fails or times out
         """
@@ -182,35 +183,26 @@ class JinaEmbedding(MultimodalEmbedding):
         embeddings = [item["embedding"] for item in response["data"]]
         return embeddings
 
-    def check_connectivity(self, timeout: float = 5.0) -> bool:
-        """
-        Test the connectivity to the remote Jina Embedding API, supporting timeout detection
-        
-        Args:
-            timeout: Timeout in seconds, default is 5 seconds
-            
-        Returns:
-            bool: Returns True if the connection is successful, False if it fails or times out
-        """
+    async def dimension_check(self, timeout: float = 5.0) -> List[List[float]]:
         try:
             # Create a simple test input
             test_input = "Hello, nexent!"
 
             # Try to get embedding vectors, setting a timeout
-            embeddings = self.get_embeddings(test_input, timeout=timeout)
+            embeddings = await asyncio.to_thread(self.get_embeddings,test_input, timeout=timeout)
 
             # If embedding vectors are successfully obtained, the connection is normal
-            return len(embeddings) > 0
+            return embeddings
 
         except requests.exceptions.Timeout:
             logging.error(f"Embedding API connection test timed out ({timeout} seconds)")
-            return False
+            return []
         except requests.exceptions.ConnectionError:
             logging.error("Embedding API connection error, unable to establish connection")
-            return False
+            return []
         except Exception as e:
             logging.error(f"Embedding API connection test failed: {str(e)}")
-            return False
+            return []
 
 
 class OpenAICompatibleEmbedding(TextEmbedding):
@@ -267,31 +259,23 @@ class OpenAICompatibleEmbedding(TextEmbedding):
         embeddings = [item["embedding"] for item in response["data"]]
         return embeddings
 
-    def check_connectivity(self, timeout: float = 5.0) -> bool:
-        """
-        Test the connectivity to the remote OpenAI API, supporting timeout detection
-        
-        Args:
-            timeout: Timeout in seconds, default is 5 seconds
-            
-        Returns:
-            bool: Returns True if the connection is successful, False if it fails or times out
-        """
+    async def dimension_check(self, timeout: float = 5.0) -> List[List[float]]:
         try:
+            # Create a simple test input
             test_input = "Hello, nexent!"
 
-            # Try to get embedding vectors, setting a timeout
-            embeddings = self.get_embeddings(test_input, timeout=timeout)
+            # Try to get embedding vectors in a background thread, setting a timeout
+            embeddings = await asyncio.to_thread(self.get_embeddings, test_input, timeout=timeout)
 
             # If embedding vectors are successfully obtained, the connection is normal
-            return len(embeddings) > 0
+            return embeddings
 
         except requests.exceptions.Timeout:
             logging.error(f"OpenAI API connection test timed out ({timeout} seconds)")
-            return False
+            return []
         except requests.exceptions.ConnectionError:
             logging.error("OpenAI API connection error, unable to establish connection")
-            return False
+            return []
         except Exception as e:
             logging.error(f"OpenAI API connection test failed: {str(e)}")
-            return False
+            return []

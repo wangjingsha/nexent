@@ -2,9 +2,10 @@
 
 [![English](https://img.shields.io/badge/English-README-blue)](README.md)
 [![中文](https://img.shields.io/badge/中文-README-green)](README_CN.md)
+[![Documentation](https://img.shields.io/badge/Documentation-yellow)](https://modelengine-group.github.io/nexent)
 [![codecov](https://codecov.io/gh/ModelEngine-Group/nexent/branch/develop/graph/badge.svg?token=00JM5YAD5V)](https://codecov.io/gh/ModelEngine-Group/nexent?branch=develop)
 
-Nexent is an open-source agent platform that turns process-level natural language into complete multimodal agents — no diagrams, no wiring. Built on the MCP tool ecosystem, Nexent provides model integration, data processing, knowledge-base management, and zero-code agent development. Our goal is simple: to bring data, models, and tools together in one smart hub, making daily workflows smarter and more connected.
+Nexent is a zero-code platform for auto-generating agents — no orchestration, no complex drag-and-drop required, using pure language to develop any agent you want. Built on the MCP ecosystem with rich tool integration, Nexent also provides various built-in agents to meet your intelligent service needs in different scenarios such as work, travel, and daily life. Nexent offers powerful capabilities for agent running control, multi-agent collaboration, data processing and knowledge tracing, multimodal dialogue, and batch scaling.
 
 > One prompt. Endless reach.
 
@@ -13,7 +14,7 @@ Nexent is an open-source agent platform that turns process-level natural languag
 - 🌐 Visit our [official website](http://nexent.tech/) to learn more
 - 🚀 [Try it now](http://nexent.tech/try) to experience the power of Nexent
 
-https://github.com/user-attachments/assets/0758629c-3477-4cd4-a737-0aab330d53a7
+https://github.com/user-attachments/assets/b844e05d-5277-4509-9463-1c5b3516f11e
 
 # 🤝 Join Our Community
 
@@ -26,7 +27,7 @@ We have released **Nexent v1**, and the platform is now relatively stable. Howev
 
 > *Rome wasn't built in a day.*
 
-If our vision speaks to you, jump in via the **[Contribution Guide](CONTRIBUTING.md)** and shape Nexent with us.
+If our vision speaks to you, jump in via the **[Contribution Guide](https://modelengine-group.github.io/nexent/en/contributing)** and shape Nexent with us.
 
 Early contributors won't go unnoticed: from special badges and swag to other tangible rewards, we're committed to thanking the pioneers who help bring Nexent to life.
 
@@ -47,50 +48,21 @@ Most of all, we need visibility. Star ⭐ and watch the repo, share it with frie
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent/docker
-cp .env.example .env # fill only nessasary configs
+cp .env.example .env # fill only necessary configs
 bash deploy.sh
 ```
 
 When the containers are running, open **http://localhost:3000** in your browser and follow the setup wizard.
 
-### 3. 🤖 Model Configuration & Provider Recommendations
+# 🌱 MCP Tool Ecosystem
 
-We recommend the following model providers:
+Check our [MCP Ecosystem page](https://modelengine-group.github.io/nexent/en/mcp-ecosystem/overview.html) for detailed information about the MCP tool ecosystem, including community hubs, recommended tools, and integration guides.
 
-| Model Type | Provider | Notes |
-|------------|----------|-------|
-| LLM & VLLM | [Silicon Flow](https://siliconflow.cn/) | Free tier available |
-| LLM & VLLM | [Alibaba Bailian](https://bailian.console.aliyun.com/) | Free tier available |
-| Embedding | [Jina](https://jina.ai/) | Free tier available |
-| TTS & STT | [Volcengine Voice](https://www.volcengine.com/product/voice-tech) | Free for personal use |
-| Search | [EXA](https://exa.ai/) | Free tier available |
+### 🚀 Suggested Agent Scenarios
 
-You'll need to input the following information in the model configuration page:
-- Base URL
-- API Key
-- Model Name
+Check our [Agent Scenarios page](https://modelengine-group.github.io/nexent/en/mcp-ecosystem/use-cases.html) for detailed agent use cases and best practices, including travel planning, research assistant, business intelligence, smart lifestyle, and more scenarios.
 
-The following configurations need to be added to your `.env` file (we'll make these configurable through the frontend soon):
-- TTS and STT related configurations
-- EXA search API Key
-
-> ℹ️ Due to core features development, currently, we only support Jina Embedding model. Support for other models will be added in future releases. For Jina API key setup, please refer to our [FAQ](FAQ.md).
-
-### 4. ❓ Need help?
-
-- Browse the [FAQ](FAQ.md) for common install issues.  
-- Drop questions in our [Discord community](https://discord.gg/tb5H3S3wyv).  
-- File bugs or feature ideas in [GitHub Issues](https://github.com/ModelEngine-Group/nexent/issues).
-
-### 5. 🔧 Hack on Nexent
-
-Want to build from source or add new features? Check the [Contribution Guide](CONTRIBUTING.md) for step-by-step instructions.
-
-### 6. 🛠️ Build from Source
-
-Prefer to run Nexent from source code? Follow our [Developer Guide](DEVELOPPER_NOTE.md) for detailed setup instructions and customization options.
-
-## ✨ Key Features
+# ✨ Key Features
 
 `1` **Smart agent prompt generation**  
    Turn plain language into runnable prompts. Nexent automatically chooses the right tools and plans the best action path for every request.
@@ -127,35 +99,29 @@ Prefer to run Nexent from source code? Follow our [Developer Guide](DEVELOPPER_N
 
    ![Feature 7](./assets/Feature7.png)
 
+# 🛠️ Developer Guide
+
+### 🤖 Model Configuration & Provider Recommendations
+
+Check our [Model Providers page](https://modelengine-group.github.io/nexent/en/getting-started/model-providers.html) for detailed model configuration guides and recommended provider information.
+
+### 🔧 Hack on Nexent
+
+Want to build from source or add new features? Check the [Contribution Guide](https://modelengine-group.github.io/nexent/en/contributing) for step-by-step instructions.
+
+### 🛠️ Build from Source
+
+Prefer to run Nexent from source code? Follow our [Developer Guide](https://modelengine-group.github.io/nexent/en/getting-started/development-guide) for detailed setup instructions and customization options.
+
 # 🐛 Known Issues
 
-1📝 **Code Output May Be Misinterpreted as Executable**  
-   In Nexent conversations, if the model outputs code-like text, it may sometimes be misinterpreted as something that should be executed. We will fix this as soon as possible.
-
-# 👥 External Developer Contribution Guide
-
-We welcome all kinds of contributions! Whether you're fixing bugs, adding features, or improving documentation, your help makes Nexent better for everyone. 
-
-If you are an external developer and want to contribute to this project, please follow these steps:
-
-1. **Fork the repository**
-   - Click the "Fork" button at the top right of the repository page to create your own copy.
-2. **Clone your fork**
-   - Use `git clone https://github.com/your-username/your-forked-repo.git` to clone your fork to your local machine.
-3. **Commit and push your changes**
-   - Make your changes, then use `git add .`, `git commit -m "Your message"`, and `git push origin` to push to your fork.
-4. **Open a Pull Request**
-   - Go to your forked repository on GitHub, click the "Contribute" button, and then select "Open Pull Request" to propose merging your changes into the main repository.
-
-Please make sure your PR follows the project's contribution guidelines and passes all required checks.
-
-- 📖 Read our [Contribution Guide](CONTRIBUTING.md) to get started
-- 🐛 Report bugs or suggest features in [GitHub Issues](https://github.com/ModelEngine-Group/nexent/issues)
-- 💬 Join our [Discord community](https://discord.gg/tb5H3S3wyv) to discuss ideas
+Check our [Known Issues page](https://modelengine-group.github.io/nexent/en/known-issues.html) for the latest issue status and solutions.
 
 # 💬 Community & contact
 
-Join our [Discord community](https://discord.gg/tb5H3S3wyv) to chat with other developers and get help!
+- Browse the [FAQ](https://modelengine-group.github.io/nexent/en/faq) for common install issues.  
+- Join our [Discord community](https://discord.gg/tb5H3S3wyv) to chat with other developers and get help!
+- File bugs or feature ideas in [GitHub Issues](https://github.com/ModelEngine-Group/nexent/issues).
 
 # 📄 License
 

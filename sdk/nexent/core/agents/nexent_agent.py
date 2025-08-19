@@ -1,13 +1,15 @@
+from threading import Event
 from typing import List
 
-from threading import Event
-from smolagents import ActionStep, TaskStep, AgentText, handle_agent_output_types
-from ..utils.observer import ProcessType
-from .agent_model import ModelConfig, ToolConfig, AgentConfig, AgentHistory
-from ..utils.observer import MessageObserver
+from smolagents import ActionStep, AgentText, TaskStep, handle_agent_output_types
+from smolagents.tools import Tool
+
 from ..models.openai_llm import OpenAIModel
-from .core_agent import CoreAgent
 from ..tools import *  # Used for tool creation, do not delete!!!
+from ..utils.observer import MessageObserver, ProcessType
+from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
+from .core_agent import CoreAgent, convert_code_format
+
 
 class NexentAgent:
     def __init__(self, observer: MessageObserver,
@@ -32,10 +34,14 @@ class NexentAgent:
 
         self.agent = None
 
-
     def create_model(self, model_cite_name: str):
         """create a model instance"""
-        model_config = next(model_config for model_config in self.model_config_list if model_config.cite_name == model_cite_name)
+        # Filter out None values and find matching model config
+        model_config = next(
+            (model_config for model_config in self.model_config_list
+             if model_config is not None and model_config.cite_name == model_cite_name),
+            None
+        )
         if model_config is None:
             raise ValueError(f"Model {model_cite_name} not found")
         model = OpenAIModel(
@@ -49,6 +55,7 @@ class NexentAgent:
         model.stop_event = self.stop_event
         return model
 
+
     def create_local_tool(self, tool_config: ToolConfig):
         class_name = tool_config.class_name
         params = tool_config.params
@@ -56,11 +63,9 @@ class NexentAgent:
         if tool_class is None:
             raise ValueError(f"{class_name} not found in local")
         else:
-
-
             if class_name == "KnowledgeBaseSearchTool":
                 tools_obj = tool_class(index_names=tool_config.metadata.get("index_names", []),
-                                       observer= self.observer,
+                                       observer=self.observer,
                                        es_core=tool_config.metadata.get("es_core", []),
                                        embedding_model=tool_config.metadata.get("embedding_model", []),
                                        **params)
@@ -69,6 +74,10 @@ class NexentAgent:
                 if hasattr(tools_obj, 'observer'):
                     tools_obj.observer = self.observer
             return tools_obj
+
+    def create_langchain_tool(self, tool_config: ToolConfig):
+        tool_obj = tool_config.metadata
+        return Tool.from_langchain(tool_obj)
 
     def create_mcp_tool(self, class_name):
         if self.mcp_tool_collection is None:
@@ -93,6 +102,8 @@ class NexentAgent:
                 tool_obj = self.create_local_tool(tool_config)
             elif source == "mcp":
                 tool_obj = self.create_mcp_tool(class_name)
+            elif source == "langchain":
+                tool_obj = self.create_langchain_tool(tool_config)
             else:
                 raise ValueError(f"unsupported tool source: {source}")
             return tool_obj
@@ -181,9 +192,11 @@ class NexentAgent:
             final_answer = handle_agent_output_types(final_answer)
 
             if isinstance(final_answer, AgentText):
-                observer.add_message(self.agent.agent_name, ProcessType.FINAL_ANSWER, final_answer.to_string())
+                final_answer_str = convert_code_format(final_answer.to_string())
+                observer.add_message(self.agent.agent_name, ProcessType.FINAL_ANSWER, final_answer_str)
             else:
-                observer.add_message(self.agent.agent_name, ProcessType.FINAL_ANSWER, str(final_answer))
+                final_answer_str = convert_code_format(str(final_answer))
+                observer.add_message(self.agent.agent_name, ProcessType.FINAL_ANSWER, final_answer_str)
 
             # Check if we need to stop from external stop_event
             if self.agent.stop_event.is_set():

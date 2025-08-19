@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Input, message, Radio, ColorPicker, Button, Typography, Card, Col, Row } from 'antd';
+import { Input, Radio, ColorPicker, Button, Typography, Card, Col, Row, App } from 'antd';
 import { useConfig } from '@/hooks/useConfig';
 import { PlusOutlined } from '@ant-design/icons';
 import { Pencil } from 'lucide-react';
@@ -30,6 +30,7 @@ const cardTheme = {
 
 export const AppConfigSection: React.FC = () => {
   const { t } = useTranslation();
+  const { message } = App.useApp();
   const { appConfig, updateAppConfig, getAppAvatarUrl } = useConfig();
   
   // 添加本地状态管理输入值
@@ -38,6 +39,12 @@ export const AppConfigSection: React.FC = () => {
   
   // 添加错误状态管理
   const [appNameError, setAppNameError] = useState(false);
+
+  // 添加用户输入状态跟踪
+  const isUserTypingAppName = useRef(false);
+  const isUserTypingDescription = useRef(false);
+  const appNameUpdateTimer = useRef<NodeJS.Timeout | null>(null);
+  const descriptionUpdateTimer = useRef<NodeJS.Timeout | null>(null);
 
   // 头像相关状态
   const [isAvatarModalOpen, setIsAvatarModalOpen] = useState(false);
@@ -59,8 +66,13 @@ export const AppConfigSection: React.FC = () => {
     const handleConfigChanged = (event: any) => {
       const { config } = event.detail;
       if (config?.app) {
-        setLocalAppName(config.app.appName || "");
-        setLocalAppDescription(config.app.appDescription || "");
+        // 只有在用户未正在输入时才更新状态
+        if (!isUserTypingAppName.current) {
+          setLocalAppName(config.app.appName || "");
+        }
+        if (!isUserTypingDescription.current) {
+          setLocalAppDescription(config.app.appDescription || "");
+        }
         setAvatarType(config.app.iconType || "preset");
         setCustomAvatarUrl(config.app.customIconUrl || null);
         
@@ -79,8 +91,13 @@ export const AppConfigSection: React.FC = () => {
 
   // 监听appConfig变化，同步更新本地状态
   useEffect(() => {
-    setLocalAppName(appConfig.appName);
-    setLocalAppDescription(appConfig.appDescription);
+    // 只有在用户未正在输入时才更新状态
+    if (!isUserTypingAppName.current) {
+      setLocalAppName(appConfig.appName);
+    }
+    if (!isUserTypingDescription.current) {
+      setLocalAppDescription(appConfig.appDescription);
+    }
     setAvatarType(appConfig.iconType);
     setCustomAvatarUrl(appConfig.customIconUrl);
   }, [appConfig.appName, appConfig.appDescription, appConfig.iconType, appConfig.customIconUrl]);
@@ -105,27 +122,74 @@ export const AppConfigSection: React.FC = () => {
     };
   }, []);
 
+  // 清理定时器
+  useEffect(() => {
+    return () => {
+      if (appNameUpdateTimer.current) {
+        clearTimeout(appNameUpdateTimer.current);
+      }
+      if (descriptionUpdateTimer.current) {
+        clearTimeout(descriptionUpdateTimer.current);
+      }
+    };
+  }, []);
+
   // Handle basic app config changes
   const handleAppNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newAppName = e.target.value;
+    isUserTypingAppName.current = true;
     setLocalAppName(newAppName);
+    
     // 如果输入了值，清除错误状态
     if (newAppName.trim()) {
       setAppNameError(false);
     }
+
+    // 清除之前的定时器
+    if (appNameUpdateTimer.current) {
+      clearTimeout(appNameUpdateTimer.current);
+    }
+
+    // 设置防抖更新
+    appNameUpdateTimer.current = setTimeout(() => {
+      updateAppConfig({ appName: newAppName });
+      isUserTypingAppName.current = false;
+    }, 500);
   };
 
   const handleAppNameBlur = () => {
+    // 清除定时器，立即更新
+    if (appNameUpdateTimer.current) {
+      clearTimeout(appNameUpdateTimer.current);
+    }
     updateAppConfig({ appName: localAppName });
+    isUserTypingAppName.current = false;
   };
 
   const handleDescriptionChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newDescription = e.target.value;
+    isUserTypingDescription.current = true;
     setLocalAppDescription(newDescription);
+
+    // 清除之前的定时器
+    if (descriptionUpdateTimer.current) {
+      clearTimeout(descriptionUpdateTimer.current);
+    }
+
+    // 设置防抖更新
+    descriptionUpdateTimer.current = setTimeout(() => {
+      updateAppConfig({ appDescription: newDescription });
+      isUserTypingDescription.current = false;
+    }, 500);
   };
 
   const handleDescriptionBlur = () => {
+    // 清除定时器，立即更新
+    if (descriptionUpdateTimer.current) {
+      clearTimeout(descriptionUpdateTimer.current);
+    }
     updateAppConfig({ appDescription: localAppDescription });
+    isUserTypingDescription.current = false;
   };
 
   // 打开头像选择模态框
@@ -201,8 +265,6 @@ export const AppConfigSection: React.FC = () => {
           avatarUri: tempCustomAvatarUrl || null
         });
       }
-
-      message.success(t('appConfig.icon.saveSuccess'));
     } catch (error) {
       message.error(t('appConfig.icon.saveError'));
       console.error(t('appConfig.icon.saveErrorLog'), error);
@@ -249,7 +311,7 @@ export const AppConfigSection: React.FC = () => {
             }}
           >
             <div className="flex items-start justify-center mx-auto my-2" style={{ maxWidth: "95%" }}>
-              <div className="mr-6 mt-4 relative group">
+              <div className="mr-6 mt-1 relative group">
                 <div 
                   className="h-[60px] w-[60px] rounded-full overflow-hidden cursor-pointer"
                   style={{ boxShadow: "0 4px 12px rgba(0,0,0,0.2)" }}
@@ -267,9 +329,8 @@ export const AppConfigSection: React.FC = () => {
               </div>
               <div className="flex-1">
                 <div className="mb-4">
-                  <div className="block mb-2">
+                  <div className="flex items-center mb-2 min-h-[24px]">
                     <Text className="text-base text-gray-700 font-bold">{t('appConfig.appName.label')}</Text>
-                    <Text className="text-lg text-red-500 font-bold ml-1">*</Text>
                   </div>
                   <Input
                     placeholder={t('appConfig.appName.placeholder')}
@@ -283,7 +344,7 @@ export const AppConfigSection: React.FC = () => {
                   />
                 </div>
                 <div className="mb-1">
-                  <div className="block mb-2">
+                  <div className="flex items-center mb-2 min-h-[24px]">
                     <Text className="text-base text-gray-700 font-bold">{t('appConfig.description.label')}</Text>
                   </div>
                   <TextArea
@@ -292,7 +353,7 @@ export const AppConfigSection: React.FC = () => {
                     onChange={handleDescriptionChange}
                     onBlur={handleDescriptionBlur}
                     className="text-md rounded-md"
-                    autoSize={{ minRows: 12 }}
+                    autoSize={{ minRows: 15 }}
                     size="large"
                   />
                 </div>

@@ -26,6 +26,8 @@ from fastapi.responses import StreamingResponse
 from consts.const import ES_API_KEY, ES_HOST
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.file_management_utils import get_all_files_status, get_file_size
+from utils.prompt_template_utils import get_knowledge_summary_prompt_template
+from jinja2 import Template, StrictUndefined
 from database.knowledge_db import create_knowledge_record, get_knowledge_record, update_knowledge_record, delete_knowledge_record
 from database.attachment_db import delete_file
 
@@ -49,14 +51,16 @@ def generate_knowledge_summary_stream(keywords: str, language: str, tenant_id: s
     load_dotenv()
 
     # Load prompt words based on language
-    template_file = 'backend/prompts/knowledge_summary_agent.yaml' if language == 'zh' else 'backend/prompts/knowledge_summary_agent_en.yaml'
-    with open(template_file, 'r', encoding='utf-8') as f:
-        prompts = yaml.safe_load(f)
-    logger.info(f"Generating knowledge with template: {template_file}")
+    prompts = get_knowledge_summary_prompt_template(language)
+
+    # Render templates using Jinja2
+    system_prompt = Template(prompts['system_prompt'], undefined=StrictUndefined).render({})
+    user_prompt = Template(prompts['user_prompt'], undefined=StrictUndefined).render({'content': keywords})
+
     # Build messages
     messages: List[ChatCompletionMessageParam] = [
-        {"role": "system", "content": prompts['system_prompt']},
-        {"role": "user", "content": prompts['user_prompt'].format(content=keywords)}
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
     ]
 
     # Get model configuration from tenant config manager
@@ -86,7 +90,7 @@ def generate_knowledge_summary_stream(keywords: str, language: str, tenant_id: s
     except Exception as e:
         logger.error(f"Error occurred: {str(e)}")
         yield f"Error: {str(e)}"
-        
+
 
 # Initialize ElasticSearchCore instance with HTTPS support
 elastic_core = ElasticSearchCore(
@@ -129,8 +133,7 @@ class ElasticSearchService:
             # 1. Get all files associated with the index from Elasticsearch
             logger.debug(f"Step 1/4: Retrieving file list for index: {index_name}")
             try:
-                file_list_result = await ElasticSearchService.list_files(index_name, include_chunks=False,
-                                                                         search_redis=True, es_core=es_core)
+                file_list_result = await ElasticSearchService.list_files(index_name, include_chunks=False, es_core=es_core)
                 files_to_delete = file_list_result.get("files", [])
                 logger.debug(f"Found {len(files_to_delete)} files to delete from MinIO for index '{index_name}'.")
             except Exception as e:
@@ -242,7 +245,7 @@ class ElasticSearchService:
         try:
             # 1. Get list of files from the index
             try:
-                files_to_delete = await ElasticSearchService.list_files(index_name, search_redis=False, es_core=es_core)
+                files_to_delete = await ElasticSearchService.list_files(index_name, es_core=es_core)
                 if files_to_delete and files_to_delete.get("files"):
                     # 2. Delete files from MinIO storage
                     for file_info in files_to_delete["files"]:
@@ -513,7 +516,6 @@ class ElasticSearchService:
     async def list_files(
             index_name: str = Path(..., description="Name of the index"),
             include_chunks: bool = Query(False, description="Whether to include text chunks for each file"),
-            search_redis: bool = Query(True, description="Whether to search Redis to get incomplete files"),
             es_core: ElasticSearchCore = Depends(get_es_core)
     ):
         """
@@ -522,7 +524,6 @@ class ElasticSearchService:
         Args:
             index_name: Name of the index
             include_chunks: Whether to include text chunks for each file
-            search_redis: Whether to search Redis to get incomplete files
             es_core: ElasticSearchCore instance
 
         Returns:
@@ -533,63 +534,51 @@ class ElasticSearchService:
             # Get existing files from ES
             existing_files = es_core.get_file_list_with_details(index_name)
 
-            if search_redis:
-                # Get unique celery files list and the status of each file
-                celery_task_files = await get_all_files_status(index_name)
-                # Create a set of path_or_urls from existing files for quick lookup
-                existing_paths = {file_info.get('path_or_url') for file_info in existing_files}
+            # Get unique celery files list and the status of each file
+            celery_task_files = await get_all_files_status(index_name)
+            # Create a set of path_or_urls from existing files for quick lookup
+            existing_paths = {file_info.get('path_or_url') for file_info in existing_files}
 
-                # For files already stored in ES, add to files list
-                for file_info in existing_files:
+            # For files already stored in ES, add to files list
+            for file_info in existing_files:
+                file_data = {
+                    'path_or_url': file_info.get('path_or_url'),
+                    'file': file_info.get('filename', ''),
+                    'file_size': file_info.get('file_size', 0),
+                    'create_time': file_info.get('create_time', ''),
+                    'status': "COMPLETED",
+                    'latest_task_id': ''
+                }
+                files.append(file_data)
+
+            # For files not yet stored in ES (files currently being processed)
+            for path_or_url, status_info in celery_task_files.items():
+                # Skip files that are already in existing_files to avoid duplicates
+                if path_or_url not in existing_paths:
+                    # Ensure status_info is a dictionary
+                    status_dict = status_info if isinstance(status_info, dict) else {}
+
+                    # Get source_type and original_filename, with defaults
+                    source_type = status_dict.get('source_type') if status_dict.get('source_type') else 'minio'
+                    original_filename = status_dict.get('original_filename')
+
+                    # Determine the filename
+                    filename = original_filename or (os.path.basename(path_or_url) if path_or_url else '')
+
+                    # Safely get file size; default to 0 on any error
+                    try:
+                        file_size = get_file_size(source_type or 'minio', path_or_url)
+                    except Exception as size_err:
+                        logger.error(f"Failed to get file size for '{path_or_url}': {size_err}")
+                        file_size = 0
+
                     file_data = {
-                        'path_or_url': file_info.get('path_or_url'),
-                        'file': file_info.get('filename', ''),
-                        'file_size': file_info.get('file_size', 0),
-                        'create_time': file_info.get('create_time', ''),
-                        'status': "COMPLETED",
-                        'latest_task_id': ''
-                    }
-                    files.append(file_data)
-
-                # For files not yet stored in ES (files currently being processed)
-                for path_or_url, status_info in celery_task_files.items():
-                    # Skip files that are already in existing_files to avoid duplicates
-                    if path_or_url not in existing_paths:
-                        # Ensure status_info is a dictionary
-                        status_dict = status_info if isinstance(status_info, dict) else {}
-
-                        # Get source_type and original_filename, with defaults
-                        source_type = status_dict.get('source_type') if status_dict.get('source_type') else 'minio'
-                        original_filename = status_dict.get('original_filename')
-
-                        # Determine the filename
-                        filename = original_filename or (os.path.basename(path_or_url) if path_or_url else '')
-
-                        # Safely get file size; default to 0 on any error
-                        try:
-                            file_size = get_file_size(source_type or 'minio', path_or_url)
-                        except Exception as size_err:
-                            logger.error(f"Failed to get file size for '{path_or_url}': {size_err}")
-                            file_size = 0
-
-                        file_data = {
-                            'path_or_url': path_or_url,
-                            'file': filename,
-                            'file_size': file_size,
-                            'create_time': time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
-                            'status': status_dict.get('state', 'UNKNOWN'),
-                            'latest_task_id': status_dict.get('latest_task_id', '')
-                        }
-                        files.append(file_data)
-            else:
-                # Only process files already stored in ES (simplified flow)
-                for file_info in existing_files:
-                    file_data = {
-                        'path_or_url': file_info.get('path_or_url'),
-                        'file': file_info.get('filename', ''),
-                        'file_size': file_info.get('file_size', 0),
-                        'create_time': file_info.get('create_time', ''),
-                        'status': "COMPLETED"
+                        'path_or_url': path_or_url,
+                        'file': filename,
+                        'file_size': file_size,
+                        'create_time': time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
+                        'status': status_dict.get('state', 'UNKNOWN'),
+                        'latest_task_id': status_dict.get('latest_task_id', '')
                     }
                     files.append(file_data)
 

@@ -34,8 +34,8 @@ from celery.signals import (
 )
 
 from .app import app
-from .config import config
-from .ray_config import init_ray_for_worker
+from consts.const import REDIS_URL, ELASTICSEARCH_SERVICE, RAY_PLASMA_DIRECTORY, CELERY_TASK_TIME_LIMIT, CELERY_WORKER_PREFETCH_MULTIPLIER, RAY_ADDRESS, QUEUES, WORKER_NAME, WORKER_CONCURRENCY
+from .ray_config import RayConfig
 
 # Global worker state for monitoring and debugging
 worker_state = {
@@ -71,24 +71,24 @@ def setup_worker_environment(**kwargs):
     logger.info("="*60)
     
     try:
+        # Disable verbose Celery task success logging
+        logging.getLogger('celery.worker.strategy').setLevel(logging.WARNING)
+
         # Initialize Ray - connect to existing cluster
         if not ray.is_initialized():
             logger.info("🔮 Ray connecting to existing cluster...")
             
             # Get Ray address from environment
-            ray_address = os.environ.get('RAY_ADDRESS', 'auto')
+            ray_address = RAY_ADDRESS
             
             try:
-                # Use the new Ray configuration module if available
-                if init_ray_for_worker:
-                    if not init_ray_for_worker(ray_address):
-                        raise ConnectionError("Failed to initialize Ray connection")
-                else:
-                    # Fallback to direct ray.init
+                # Initialize Ray using the centralized RayConfig helper
+                if not RayConfig.init_ray_for_worker(ray_address):
+                    # Fallback to direct ray.init if helper fails
                     ray.init(
-                        address=ray_address, 
+                        address=ray_address,
                         ignore_reinit_error=True,
-                        _plasma_directory=config.ray_plasma_directory
+                        _plasma_directory=RAY_PLASMA_DIRECTORY
                     )
                 
                 logger.info(f"✅ Ray connected to cluster at {ray_address} successfully.")
@@ -102,8 +102,8 @@ def setup_worker_environment(**kwargs):
         # Check environment variables
         logger.info("🔍 Check sensitive variables")
         sensitive_vars = {
-            'REDIS_URL': config.redis_url,
-            'ELASTICSEARCH_SERVICE': config.elasticsearch_service
+            'REDIS_URL': REDIS_URL,
+            'ELASTICSEARCH_SERVICE': ELASTICSEARCH_SERVICE
         }
         
         for var_name, var_value in sensitive_vars.items():
@@ -201,7 +201,8 @@ def task_postrun_handler(sender=None, task_id=None, task=None, args=None, kwargs
     """Handler after task execution"""
     if state == 'SUCCESS':
         worker_state['tasks_completed'] += 1
-        logger.debug(f"✅ Task completed: {task.name}[{task_id}]")
+        # No log output for successful tasks, to reduce noise
+        pass
     else:
         logger.debug(f"⚠️ Task ended: {task.name}[{task_id}] - State: {state}")
 
@@ -235,10 +236,10 @@ def validate_redis_connection() -> bool:
     """Validate Redis connection"""
     try:
         import redis
-        redis_url = config.redis_url
+        redis_connection_url = REDIS_URL
         
         # Parse Redis URL and create connection
-        redis_client = redis.from_url(redis_url, socket_timeout=5)
+        redis_client = redis.from_url(redis_connection_url, socket_timeout=5)
         
         # Test connection
         redis_client.ping()
@@ -259,9 +260,9 @@ def start_worker():
     """Start Celery worker with appropriate settings"""
     
     # Get configuration parameters
-    queues = os.environ.get('QUEUES', 'process_q,forward_q')
-    worker_name = os.environ.get('WORKER_NAME', f'worker-{os.getpid()}')
-    concurrency = int(os.environ.get('WORKER_CONCURRENCY', '4'))
+    queues = QUEUES
+    worker_name = WORKER_NAME or f'worker-{os.getpid()}'
+    concurrency = WORKER_CONCURRENCY
     
     logger.info(f"Start Celery worker '{worker_name}' with queues: {queues}")
     logger.info(f"Worker concurrency: {concurrency}")
@@ -271,8 +272,8 @@ def start_worker():
     logger.debug(f"  Broker URL: {app.conf.broker_url}")
     logger.debug(f"  Backend URL: {app.conf.result_backend}")
     logger.debug(f"  Task routes: {app.conf.task_routes}")
-    logger.debug(f"  Task time limit: {config.celery_task_time_limit} s")
-    logger.debug(f"  Worker prefetch multiplier: {config.celery_worker_prefetch_multiplier}")
+    logger.debug(f"  Task time limit: {CELERY_TASK_TIME_LIMIT} s")
+    logger.debug(f"  Worker prefetch multiplier: {CELERY_WORKER_PREFETCH_MULTIPLIER}")
     
     # Worker startup parameters
     worker_args = [
@@ -286,7 +287,7 @@ def start_worker():
     ]
     
     try:
-        logger.info(f"⚙️  Start worker '{worker_name}'...")
+        logger.info(f"⚙️ Starting worker '{worker_name}'...")
         
         # Flush stdout to ensure immediate output
         sys.stdout.flush()

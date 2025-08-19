@@ -2,7 +2,6 @@ import asyncio
 import datetime
 import gzip
 import json
-import os
 import logging
 import time
 import uuid
@@ -14,8 +13,6 @@ from typing import Dict, Any
 import aiofiles
 import websockets
 from pydantic import BaseModel
-
-from consts.const import TEST_VOICE_PATH
 
 logger = logging.getLogger("stt_model")
 
@@ -56,13 +53,13 @@ class AudioType(Enum):
 
 class STTConfig(BaseModel):
     appid: str
-    token: str = ""
+    token: str
     ws_url: str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
     uid: str = "streaming_asr_demo"
-    format: str = "wav"
+    format: str = "pcm"
     rate: int = 16000
     bits: int = 16
-    channel: int = 2
+    channel: int = 1
     codec: str = "raw"
     seg_duration: int = 10
     mp3_seg_size: int = 1000
@@ -70,30 +67,18 @@ class STTConfig(BaseModel):
     streaming: bool = True
     compression: bool = True
 
-    @classmethod
-    def from_env(cls):
-        """Load configuration from environment variables"""
-        return cls(
-            appid=os.getenv("APPID", ""), token=os.getenv("TOKEN", ""),
-            ws_url=os.getenv("WS_URL", "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"),
-            uid=os.getenv("UID", "streaming_asr_demo"), format=os.getenv("FORMAT", "pcm"),
-            rate=int(os.getenv("RATE", "16000")), bits=int(os.getenv("BITS", "16")),
-            channel=int(os.getenv("CHANNEL", "1")), codec=os.getenv("CODEC", "raw"),
-            seg_duration=int(os.getenv("SEG_DURATION", "100")), mp3_seg_size=int(os.getenv("MP3_SEG_SIZE", "1000")),
-            resourceid=os.getenv("RESOURCEID", "volc.bigasr.sauc.duration"),
-            compression=os.getenv("COMPRESSION", "false").lower() == "true"
-            )
-
 
 class STTModel:
-    def __init__(self, config: STTConfig):
+    def __init__(self, config: STTConfig, test_voice_path: str):
         """
         Initialize the STT Model.
         
         Args:
             config: STT configuration
+            test_voice_path: Path to test voice file for connectivity testing
         """
         self.config = config
+        self.test_voice_path = test_voice_path
         self.success_code = 1000  # success code, default is 1000
 
     def generate_header(self, message_type=CLIENT_FULL_REQUEST, message_type_specific_flags=NO_SEQUENCE,
@@ -122,6 +107,8 @@ class STTModel:
         header.append((serial_method << 4) | compression_type)
         header.append(reserved_data)
         return header
+
+
 
     @staticmethod
     def generate_before_payload(sequence: int):
@@ -255,7 +242,7 @@ class STTModel:
             "request": {"model_name": "bigmodel", "enable_punc": True, # "result_type": "single",
                 # "vad_segment_duration": 800,
             }}
-        logger.info(f"req: {req}", end="\n\n")
+        logger.info(f"req: {req}\n")
         return req
 
     async def process_audio_data(self, audio_data: bytes, segment_size: int) -> Dict[str, Any]:
@@ -339,7 +326,7 @@ class STTModel:
                     logger.info(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')}, seq: {seq}, result: {result}")
 
                     if self.config.streaming:
-                        sleep_time = max(0, (self.config.seg_duration / 1000.0 - (time.time() - start)))
+                        sleep_time = max(0.0, self.config.seg_duration / 1000.0 - (time.time() - start))
                         await asyncio.sleep(sleep_time)
 
             return result
@@ -657,20 +644,107 @@ class STTModel:
             bool: True if connection successful, False otherwise
         """
         try:
-            result = await self.process_audio_file(TEST_VOICE_PATH)
-            # Check if the return result is a dictionary type and non-empty
-            return isinstance(result, dict) and bool(result)
-        except Exception:
+            logger.info(f"STT connectivity test started with config: ws_url={self.config.ws_url}, format={self.config.format}")
+            logger.info(f"Test voice file path: {self.test_voice_path}")
+            
+            result = await self.process_audio_file(self.test_voice_path)
+            logger.info(f"STT process_audio_file result: {result}")
+            
+            # Check if the return result indicates success
+            is_success = self._is_stt_result_successful(result)
+            
+            if is_success:
+                logger.info("STT connectivity test successful")
+            else:
+                error_msg = self._extract_stt_error_message(result)
+                logger.error(f"STT connectivity test failed with error: {error_msg}")
+            
+            return is_success
+        except Exception as e:
+            logger.error(f"STT connectivity test failed with exception: {str(e)}")
+            import traceback
+            logger.error(f"STT connectivity test exception traceback: {traceback.format_exc()}")
             return False
 
+    def _is_stt_result_successful(self, result) -> bool:
+        """
+        Check if STT result indicates a successful recognition
+        
+        Args:
+            result: STT processing result
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not isinstance(result, dict) or not result:
+            return False
+            
+        # Check for direct error field
+        if 'error' in result:
+            return False
+            
+        # Check for error code (STT service uses codes like 45000081 for errors)
+        if 'code' in result and result['code'] != 1000:  # 1000 is success code
+            return False
+            
+        # Check for nested error in payload_msg
+        if 'payload_msg' in result and isinstance(result['payload_msg'], dict):
+            if 'error' in result['payload_msg']:
+                return False
+                
+        # For a successful STT result, we expect either:
+        # 1. A payload_msg with result.text, or
+        # 2. No error indicators
+        payload_msg = result.get('payload_msg', {})
+        if isinstance(payload_msg, dict):
+            # If there's a result field, check if it contains valid text
+            if 'result' in payload_msg:
+                return True  # Even empty text can be valid for connectivity test
+                
+        # If no obvious errors and it's a valid dict, consider it successful
+        return True
 
-async def process_audio_item(audio_item: Dict[str, Any], config: STTConfig) -> Dict[str, Any]:
+    def _extract_stt_error_message(self, result) -> str:
+        """
+        Extract error message from STT result
+        
+        Args:
+            result: STT processing result
+            
+        Returns:
+            str: Error message
+        """
+        if not isinstance(result, dict):
+            return f"Invalid result type: {type(result)}"
+            
+        # Check for direct error field
+        if 'error' in result:
+            return str(result['error'])
+            
+        # Check for error code with message
+        if 'code' in result and result['code'] != 1000:
+            error_msg = f"STT service error code: {result['code']}"
+            if 'payload_msg' in result and isinstance(result['payload_msg'], dict):
+                if 'error' in result['payload_msg']:
+                    error_msg += f" - {result['payload_msg']['error']}"
+            return error_msg
+            
+        # Check for nested error in payload_msg
+        if 'payload_msg' in result and isinstance(result['payload_msg'], dict):
+            if 'error' in result['payload_msg']:
+                return str(result['payload_msg']['error'])
+                
+        return f"Unknown error in result: {result}"
+
+
+async def process_audio_item(audio_item: Dict[str, Any], config: STTConfig, test_voice_path: str) -> Dict[str, Any]:
     """
     Process an audio item with the STT model.
     
     Args:
         audio_item: Audio item with 'id' and 'path' keys
         config: STT configuration
+        test_voice_path: Path to test voice file for connectivity testing
         
     Returns:
         Recognition result with id and path
@@ -681,7 +755,7 @@ async def process_audio_item(audio_item: Dict[str, Any], config: STTConfig) -> D
     audio_id = audio_item['id']
     audio_path = audio_item['path']
 
-    stt_model = STTModel(config)
+    stt_model = STTModel(config, test_voice_path)
     result = await stt_model.recognize_file(audio_path)
 
     return {"id": audio_id, "path": audio_path, "result": result}

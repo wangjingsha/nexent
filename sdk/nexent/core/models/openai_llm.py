@@ -1,5 +1,6 @@
 import logging
 import threading
+import asyncio
 from typing import List, Optional, Dict, Any
 
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
@@ -36,6 +37,12 @@ class OpenAIModel(OpenAIServerModel):
             self.observer.current_mode = ProcessType.MODEL_OUTPUT_THINKING
             for chunk in current_request:
                 new_token = chunk.choices[0].delta.content
+                reasoning_content = getattr(chunk.choices[0].delta, 'reasoning_content', None)
+
+                # Handle reasoning_content if it exists and is not null
+                if reasoning_content is not None:
+                    self.observer.add_model_reasoning_content(reasoning_content)
+
                 if new_token is not None:
                     self.observer.add_model_new_token(new_token)
                     token_join.append(new_token)
@@ -67,7 +74,7 @@ class OpenAIModel(OpenAIServerModel):
                 raise ValueError(f"Token limit exceeded: {str(e)}")
             raise e
 
-    def check_connectivity(self) -> bool:
+    async def check_connectivity(self) -> bool:
         """
         Test if the connection to the remote OpenAI large model service is normal
         
@@ -79,11 +86,18 @@ class OpenAIModel(OpenAIServerModel):
             test_message = [{"role": "user", "content": "Hello"}]
 
             # Directly send a short chat request to test the connection
-            completion_kwargs = self._prepare_completion_kwargs(messages=test_message, model=self.model_id,
-                max_tokens=5)
+            completion_kwargs = self._prepare_completion_kwargs(
+                messages=test_message,
+                model=self.model_id,
+                max_tokens=5,
+            )
 
-            # Send the request without using streaming to reduce overhead
-            response = self.client.chat.completions.create(stream=False, **completion_kwargs)
+            # Offload the blocking SDK call to a thread pool to avoid blocking the event loop
+            await asyncio.to_thread(
+                self.client.chat.completions.create,
+                stream=False,
+                **completion_kwargs,
+            )
 
             # If no exception is raised, the connection is successful
             return True

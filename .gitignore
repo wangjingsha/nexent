@@ -17,6 +17,8 @@ docker/minio
 docker/postgresql
 docker/redis_data
 docker/uploads
+docker/openssh-server
+docker/volumes/db/data
 docker/.env
 docker/.run
 
@@ -24,8 +26,7 @@ frontend_standalone/
 .pnpm-store/
 frontend-dist/
 
-backend/assets/clip-vit-base-patch32
-model-assets
+model-assets/
 
 # Test coverage reports
 *coverage_html

@@ -1,5 +1,5 @@
 import React from 'react'
-import { Button, Checkbox } from 'antd'
+import { Button, Checkbox, ConfigProvider } from 'antd'
 import { SyncOutlined, PlusOutlined } from '@ant-design/icons'
 import { KnowledgeBase } from '@/types/knowledgeBase'
 import { useTranslation } from 'react-i18next'
@@ -81,6 +81,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
     }
   };
 
+
   return (
     <div className="w-full bg-white border border-gray-200 rounded-md flex flex-col" style={{ height: containerHeight }}>
       {/* 固定的头部区域 */}
@@ -142,7 +143,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
 
       {/* 固定的选择状态区域 */}
       <div className="border-b border-gray-200 shrink-0 relative z-10 shadow-md">
-        <div className="px-3 py-2 bg-blue-50">
+        <div className="px-5 py-2 bg-blue-50">
           <div className="flex items-center">
             <span className="font-medium text-blue-700">{t('knowledgeBase.selected.prefix')} </span>
             <span className="mx-1 text-blue-600 font-bold text-lg">{selectedIds.length}</span>
@@ -192,6 +193,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
               const canSelect = isSelectable(kb)
               const isSelected = selectedIds.includes(kb.id)
               const isActive = activeKnowledgeBase?.id === kb.id
+              const isMismatchedAndSelected = isSelected && !canSelect
 
               return (
                 <div
@@ -212,7 +214,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                     <div className="flex-shrink-0">
                       <div className="px-2" onClick={(e) => {
                         e.stopPropagation();
-                        if (canSelect) {
+                        if (canSelect || isSelected) {
                           onSelect(kb.id);
                         }
                       }}
@@ -223,18 +225,27 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                           alignItems: 'flex-start',
                           justifyContent: 'center'
                         }}>
-                        <Checkbox
-                          checked={isSelected}
-                          onChange={(e) => {
-                            e.stopPropagation()
-                            onSelect(kb.id)
+                        <ConfigProvider
+                          theme={{
+                            token: {
+                              // If selected with model mismatch, use light blue, otherwise default blue
+                              colorPrimary: isMismatchedAndSelected ? '#90caf9' : '#1677ff',
+                            },
                           }}
-                          disabled={!canSelect}
-                          style={{
-                            cursor: canSelect ? 'pointer' : 'not-allowed',
-                            transform: 'scale(1.5)',
-                          }}
-                        />
+                        >
+                          <Checkbox
+                            checked={isSelected}
+                            onChange={(e) => {
+                              e.stopPropagation()
+                              onSelect(kb.id)
+                            }}
+                            disabled={!canSelect && !isSelected}
+                            style={{
+                              cursor: (canSelect || isSelected) ? 'pointer' : 'not-allowed',
+                              transform: 'scale(1.5)',
+                            }}
+                          />
+                        </ConfigProvider>
                       </div>
                     </div>
                     <div className="flex-1 min-w-0">

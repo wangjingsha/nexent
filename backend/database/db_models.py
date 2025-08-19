@@ -167,10 +167,13 @@ class AgentInfo(TableBase):
 
     agent_id = Column(Integer, primary_key=True, nullable=False, doc="ID")
     name = Column(String(100), doc="Agent name")
+    display_name = Column(String(100), doc="Agent display name")
     description = Column(Text, doc="Description")
     model_name = Column(String(100), doc="Name of the model used")
     max_steps = Column(Integer, doc="Maximum number of steps")
-    prompt = Column(String, doc="System prompt")
+    duty_prompt = Column(Text, doc="Duty prompt content")
+    constraint_prompt = Column(Text, doc="Constraint prompt content")
+    few_shots_prompt = Column(Text, doc="Few shots prompt content")
     parent_agent_id = Column(Integer, doc="Parent Agent ID")
     tenant_id = Column(String(100), doc="Belonging tenant")
     enabled = Column(Boolean, doc="Enabled")
@@ -230,6 +233,24 @@ class TenantConfig(TableBase):
     updated_by = Column(String(100), doc="Updater")
     delete_flag = Column(String(1), default="N", doc="Whether it is deleted. Optional values: Y/N")
 
+class MemoryUserConfig(TableBase):
+    """
+    Tenant configuration information table
+    """
+    __tablename__ = "memory_user_config_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    config_id = Column(Integer, Sequence("memory_user_config_t_config_id_seq", schema=SCHEMA), primary_key=True, nullable=False, doc="ID")
+    tenant_id = Column(String(100), doc="Tenant ID")
+    user_id = Column(String(100), doc="User ID")
+    value_type = Column(String(100), doc=" the data type of config_value, optional values: single/multi", default="single")
+    config_key = Column(String(100), doc="the key of the config")
+    config_value = Column(String(10000), doc="the value of the config")
+    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Creation time")
+    update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Update time")
+    created_by = Column(String(100), doc="Creator")
+    updated_by = Column(String(100), doc="Updater")
+    delete_flag = Column(String(1), default="N", doc="Whether it is deleted. Optional values: Y/N")
 
 class McpRecord(TableBase):
     """
@@ -243,8 +264,45 @@ class McpRecord(TableBase):
     user_id = Column(String(100), doc="User ID")
     mcp_name = Column(String(100), doc="MCP name")
     mcp_server = Column(String(500), doc="MCP server address")
+    status = Column(Boolean, default=None, doc="MCP server connection status, True=connected, False=disconnected, None=unknown")
     create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Creation time, audit field")
     update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Update time, audit field")
     created_by = Column(String(100), doc="Creator ID, audit field")
     updated_by = Column(String(100), doc="Last updater ID, audit field")
     delete_flag = Column(String(1), default="N", doc="When deleted by user frontend, delete flag will be set to true, achieving soft delete effect. Optional values Y/N")
+
+
+class UserTenant(TableBase):
+    """
+    User and tenant relationship table
+    """
+    __tablename__ = "user_tenant_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    user_tenant_id = Column(Integer, Sequence("user_tenant_t_user_tenant_id_seq", schema=SCHEMA), primary_key=True, nullable=False, doc="User tenant relationship ID, unique primary key")
+    user_id = Column(String(100), nullable=False, doc="User ID")
+    tenant_id = Column(String(100), nullable=False, doc="Tenant ID")
+    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Creation time, audit field")
+    update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Update time, audit field")
+    created_by = Column(String(100), doc="Creator ID, audit field")
+    updated_by = Column(String(100), doc="Last updater ID, audit field")
+    delete_flag = Column(String(1), default="N", doc="When deleted by user frontend, delete flag will be set to true, achieving soft delete effect. Optional values Y/N")
+
+
+
+class AgentRelation(TableBase):
+    """
+    Agent parent-child relationship table
+    """
+    __tablename__ = "ag_agent_relation_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    relation_id = Column(Integer, primary_key=True, nullable=False, doc="Relationship ID, primary key")
+    selected_agent_id = Column(Integer, doc="Selected agent ID")
+    parent_agent_id = Column(Integer, doc="Parent agent ID")
+    tenant_id = Column(String(100), doc="Tenant ID")
+    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Creation time, audit field")
+    update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Update time, audit field")
+    created_by = Column(String(100), doc="Creator ID, audit field")
+    updated_by = Column(String(100), doc="Last updater ID, audit field")
+    delete_flag = Column(String(1), default="N", doc="Delete flag, set to Y for soft delete, optional values Y/N")

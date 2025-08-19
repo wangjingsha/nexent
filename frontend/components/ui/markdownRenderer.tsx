@@ -10,6 +10,8 @@ import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { SearchResult } from '@/types/chat'
 import * as TooltipPrimitive from "@radix-ui/react-tooltip"
+import { CopyButton } from '@/components/ui/copyButton'
+import { useTranslation } from "react-i18next"
 import 'katex/dist/katex.min.css'
 import 'github-markdown-css/github-markdown.css'
 
@@ -22,14 +24,14 @@ interface MarkdownRendererProps {
 // Get background color for different tool signs
 const getBackgroundColor = (toolSign: string) => {
   switch (toolSign) {
-    case 'a': return '#E3F2FD'; // 浅蓝色
-    case 'b': return '#E8F5E9'; // 浅绿色
-    case 'c': return '#FFF3E0'; // 浅橙色
-    case 'd': return '#F3E5F5'; // 浅紫色
-    case 'e': return '#FFEBEE'; // 浅红色
-    default: return '#E5E5E5'; // 默认浅灰色
+    case 'a': return '#E3F2FD'; // Light blue
+    case 'b': return '#E8F5E9'; // Light green
+    case 'c': return '#FFF3E0'; // Light orange
+    case 'd': return '#F3E5F5'; // Light purple
+    case 'e': return '#FFEBEE'; // Light red
+    default: return '#E5E5E5'; // Default light gray
   }
-}
+};
 
 // Replace the original LinkIcon component
 const CitationBadge = ({ toolSign, citeIndex }: { toolSign: string, citeIndex: number }) => (
@@ -66,7 +68,7 @@ const HoverableText = ({ text, searchResults }: {
   searchResults?: SearchResult[]
 }) => {
   const [isOpen, setIsOpen] = React.useState(false);
-  const containerRef = React.useRef<HTMLDivElement>(null);
+  const containerRef = React.useRef<HTMLSpanElement>(null);
   const tooltipRef = React.useRef<HTMLDivElement>(null);
   const mousePositionRef = React.useRef({ x: 0, y: 0 });
 
@@ -82,9 +84,9 @@ const HoverableText = ({ text, searchResults }: {
       .replace(/^\s+|\s+$/g, '');  // Remove leading and trailing whitespace
   };
 
-  // Find corresponding search result - simplified for numeric-only format
+  // Find corresponding search result
   const toolSign = text.charAt(0);
-  const citeIndex = parseInt(text.slice(1))
+  const citeIndex = parseInt(text.slice(1));
   const matchedResult = searchResults?.find(
     result => result.tool_sign === toolSign && result.cite_index === citeIndex
   );
@@ -97,13 +99,13 @@ const HoverableText = ({ text, searchResults }: {
     let timeoutId: NodeJS.Timeout | null = null;
     let closeTimeoutId: NodeJS.Timeout | null = null;
 
-    // 更新鼠标位置的处理函数
+    // Function to update mouse position
     const updateMousePosition = (e: MouseEvent) => {
       mousePositionRef.current = { x: e.clientX, y: e.clientY };
     };
 
     const handleMouseEnter = () => {
-      // 清除可能存在的关闭定时器
+      // Clear any existing close timer
       if (closeTimeoutId) {
         clearTimeout(closeTimeoutId);
         closeTimeoutId = null;
@@ -203,14 +205,14 @@ const HoverableText = ({ text, searchResults }: {
   return (
     <TooltipProvider>
       <Tooltip open={isOpen}>
-        <div
+        <span
           ref={containerRef}
           className="inline-flex items-center relative"
           style={{ zIndex: isOpen ? 1000 : 'auto' }}
         >
           <TooltipTrigger asChild>
             <span className="inline-flex items-center cursor-pointer transition-colors">
-                <CitationBadge toolSign={toolSign} citeIndex={citeIndex} />
+              <CitationBadge toolSign={toolSign} citeIndex={citeIndex} />
             </span>
           </TooltipTrigger>
           {/* Force Portal to body */}
@@ -287,7 +289,7 @@ const HoverableText = ({ text, searchResults }: {
               </div>
             </TooltipContent>
           </TooltipPrimitive.Portal>
-        </div>
+        </span>
       </Tooltip>
     </TooltipProvider>
   );
@@ -298,42 +300,45 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   className,
   searchResults = [] 
 }) => {
+  const { t } = useTranslation('common');
   // Customize code block style with light gray background
   const customStyle = {
     ...oneLight,
     'pre[class*="language-"]': {
       ...oneLight['pre[class*="language-"]'],
-      background: '#f5f5f5', // Light gray background
-      borderRadius: '4px',
-      padding: '8px 12px',
-      margin: '4px 0',
-      fontSize: '0.875rem', // Slightly smaller font size for better fit
-      lineHeight: '1.5', // Adjusted line height
-      whiteSpace: 'pre-wrap', // Allow wrapping of long lines
-      wordWrap: 'break-word', // Break long words
-      wordBreak: 'break-word', // Break long words
-      overflowWrap: 'break-word', // Break long words
-      overflow: 'auto', // Add scroll for extremely long content
-      maxWidth: '100%', // Ensure it doesn't exceed container width
-      boxSizing: 'border-box' // Include padding in width calculation
+      background: '#f8f8f8',
+      borderRadius: '0',
+      padding: '12px 16px',
+      margin: '0',
+      fontSize: '0.875rem',
+      lineHeight: '1.5',
+      whiteSpace: 'pre-wrap',
+      wordWrap: 'break-word',
+      wordBreak: 'break-word',
+      overflowWrap: 'break-word',
+      overflow: 'auto',
+      width: '100%',
+      boxSizing: 'border-box',
+      display: 'block',
+      borderTop: 'none'
     },
     'code[class*="language-"]': {
       ...oneLight['code[class*="language-"]'],
-      background: '#f5f5f5', // Light gray background
-      color: '#333333', // Dark gray text for better readability
-      fontSize: '0.875rem', // Slightly smaller font size for better fit
-      lineHeight: '1.5', // Adjusted line height
-      whiteSpace: 'pre-wrap', // Allow wrapping of long lines
-      wordWrap: 'break-word', // Break long words
-      wordBreak: 'break-word', // Break long words
-      overflowWrap: 'break-word', // Break long words
-      maxWidth: '100%', // Ensure it doesn't exceed container width
-      padding: '0' // 移除code元素的内部padding
+      background: '#f8f8f8',
+      color: '#333333',
+      fontSize: '0.875rem',
+      lineHeight: '1.5',
+      whiteSpace: 'pre-wrap',
+      wordWrap: 'break-word',
+      wordBreak: 'break-word',
+      overflowWrap: 'break-word',
+      width: '100%',
+      padding: '0',
+      display: 'block'
     }
   };
 
-  // Check if this is user message content
-  const isUserMessage = className?.includes('user-message-content');
+
 
   // Modified processText function logic
   const processText = (text: string) => {
@@ -448,7 +453,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
           white-space: nowrap;
         }
         
-        /* 全局滚动条样式 */
+        /* Global scrollbar styles */
         .tooltip-content-scroll {
           scrollbar-width: thin;
           scrollbar-color: rgb(209 213 219) transparent;
@@ -475,39 +480,248 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
           margin-bottom: 0.25rem !important;
           margin-top: 0.25rem !important;
         }
+        /* Code block container styles */
+        .code-block-container {
+          position: relative;
+          display: block;
+          border-radius: 6px;
+          margin: 16px 0;
+          width: 100%;
+          overflow: hidden;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+          border: 1px solid #e0e0e0;
+        }
+        
+        .code-block-container > div {
+          margin: 0 !important;
+        }
+        
+        .code-block-container pre {
+          margin: 0 !important;
+        }
+        
+        .code-block-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 6px 12px;
+          background: #eeeeee;
+          border-bottom: 1px solid #ddd;
+          font-size: 13px;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+          min-height: 36px;
+          box-sizing: border-box;
+        }
+        
+        .code-language-label {
+          color: #666;
+          font-weight: 500;
+          text-transform: lowercase;
+          display: flex;
+          align-items: center;
+          font-size: 12px;
+          letter-spacing: 0.5px;
+          margin-left: 0;
+        }
+        
+        .code-language-label::before {
+          display: none;
+        }
+        
+        .code-language-label[data-language="python"]::before,
+        .code-language-label[data-language="javascript"]::before,
+        .code-language-label[data-language="js"]::before,
+        .code-language-label[data-language="typescript"]::before,
+        .code-language-label[data-language="ts"]::before,
+        .code-language-label[data-language="html"]::before,
+        .code-language-label[data-language="css"]::before {
+          display: none;
+        }
+        
+        .code-block-content {
+          position: relative;
+          background: #f8f8f8;
+          padding: 0;
+        }
+        
+        .code-block-header .copy-button,
+        .code-block-header .header-copy-button {
+          padding: 2px;
+          height: 24px;
+          width: 24px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          opacity: 0.6;
+          background: transparent;
+          border: none;
+          border-radius: 4px;
+          transition: all 0.2s ease;
+          font-size: 12px;
+          cursor: pointer;
+          position: static;
+          margin: 0;
+          float: right;
+          margin-right: 0;
+        }
+        
+        .code-block-header .copy-button:hover,
+        .code-block-header .header-copy-button:hover {
+          opacity: 1;
+          background: rgba(0, 0, 0, 0.05);
+          border-color: transparent;
+        }
+        
+        .token.punctuation, .token.operator {
+          opacity: 0.7;
+        }
+        
+        .token.comment {
+          font-style: italic;
+          color: #6a9955;
+        }
+        
+        .token.string {
+          color: #a31515;
+        }
+        
+        .code-block-content pre::-webkit-scrollbar {
+          height: 6px;
+          width: 6px;
+        }
+        
+        .code-block-content pre::-webkit-scrollbar-thumb {
+          background: #ccc;
+          border-radius: 3px;
+        }
+        
+        .code-block-content pre::-webkit-scrollbar-thumb:hover {
+          background: #aaa;
+        }
       `}</style>
-      <div className={`markdown-body ${className || ''}`}>
         <ReactMarkdown
           remarkPlugins={[remarkGfm, remarkMath]}
           rehypePlugins={[rehypeKatex as any]}
           components={{
+            // Heading components
+            h1: ({children}: any) => (
+              <h1>
+                <TextWrapper>{children}</TextWrapper>
+              </h1>
+            ),
+            h2: ({children}: any) => (
+              <h2>
+                <TextWrapper>{children}</TextWrapper>
+              </h2>
+            ),
+            h3: ({children}: any) => (
+              <h3>
+                <TextWrapper>{children}</TextWrapper>
+              </h3>
+            ),
+            h4: ({children}: any) => (
+              <h4>
+                <TextWrapper>{children}</TextWrapper>
+              </h4>
+            ),
+            h5: ({children}: any) => (
+              <h5>
+                <TextWrapper>{children}</TextWrapper>
+              </h5>
+            ),
+            h6: ({children}: any) => (
+              <h6>
+                <TextWrapper>{children}</TextWrapper>
+              </h6>
+            ),
+            // Paragraph
             p: ({children}: any) => (
               <p className={`user-paragraph`}>
                 <TextWrapper>{children}</TextWrapper>
               </p>
             ),
+            // List item
+            li: ({children}: any) => (
+              <li>
+                <TextWrapper>{children}</TextWrapper>
+              </li>
+            ),
+            // Blockquote
             blockquote: ({children}: any) => (
               <blockquote className="border-l-4 border-gray-300 pl-4 py-2 my-4 bg-gray-50 italic text-base leading-relaxed">
                 <TextWrapper>{children}</TextWrapper>
               </blockquote>
             ),
+            // Table components
+            td: ({children}: any) => (
+              <td>
+                <TextWrapper>{children}</TextWrapper>
+              </td>
+            ),
+            th: ({children}: any) => (
+              <th>
+                <TextWrapper>{children}</TextWrapper>
+              </th>
+            ),
+            // Emphasis components
+            strong: ({children}: any) => (
+              <strong>
+                <TextWrapper>{children}</TextWrapper>
+              </strong>
+            ),
+            em: ({children}: any) => (
+              <em>
+                <TextWrapper>{children}</TextWrapper>
+              </em>
+            ),
+            // Strikethrough
+            del: ({children}: any) => (
+              <del>
+                <TextWrapper>{children}</TextWrapper>
+              </del>
+            ),
+            // Link
+            a: ({href, children, ...props}: any) => (
+              <a href={href} {...props}>
+                <TextWrapper>{children}</TextWrapper>
+              </a>
+            ),
+            // Code blocks and inline code
             code({node, inline, className, children, ...props}: any) {
               const match = /language-(\w+)/.exec(className || '')
+              const codeContent = String(children).replace(/^\n+|\n+$/g, '')
               return !inline && match ? (
-                <SyntaxHighlighter
-                  style={customStyle}
-                  language={match[1]}
-                  PreTag="div"
-                  {...props}
-                >
-                  {String(children).replace(/^\n+|\n+$/g, '')}
-                </SyntaxHighlighter>
+                <div className="code-block-container group">
+                  <div className="code-block-header">
+                    <span className="code-language-label" data-language={match[1]}>{match[1]}</span>
+                    <CopyButton 
+                      content={codeContent} 
+                      variant="code-block"
+                      className="header-copy-button"
+                      tooltipText={{
+                        copy: t('chatStreamMessage.copyContent'),
+                        copied: t('chatStreamMessage.copied')
+                      }}
+                    />
+                  </div>
+                  <div className="code-block-content">
+                    <SyntaxHighlighter
+                      style={customStyle}
+                      language={match[1]}
+                      PreTag="div"
+                      {...props}
+                    >
+                      {codeContent}
+                    </SyntaxHighlighter>
+                  </div>
+                </div>
               ) : (
                 <code {...props}>
                   <TextWrapper>{children}</TextWrapper>
                 </code>
               )
             },
+            // Image
             img: ({src, alt}: any) => (
               <img src={src} alt={alt} />
             )
@@ -515,7 +729,6 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
         >
           {content}
         </ReactMarkdown>
-      </div>
     </>
   );
 };

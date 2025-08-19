@@ -12,7 +12,6 @@ from database.knowledge_db import get_knowledge_record, delete_knowledge_record
 
 router = APIRouter(prefix="/indices")
 service = ElasticSearchService()
-
 logger = logging.getLogger("elasticsearch_app")
 
 
@@ -136,7 +135,7 @@ def create_index_documents(
 ):
     """
     Index documents with embeddings, creating the index if it doesn't exist.
-    Accepts an document list from data processing.
+    Accepts a document list from data processing.
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
@@ -151,12 +150,11 @@ def create_index_documents(
 @router.get("/{index_name}/files")
 async def get_index_files(
         index_name: str = Path(..., description="Name of the index"),
-        search_redis: bool = Query(True, description="Whether to search Redis to get incomplete files"),
         es_core: ElasticSearchCore = Depends(get_es_core)
 ):
     """Get all files from an index, including those that are not yet stored in ES"""
     try:
-        result = await ElasticSearchService.list_files(index_name, include_chunks=False, search_redis=search_redis, es_core=es_core)
+        result = await ElasticSearchService.list_files(index_name, include_chunks=False, es_core=es_core)
         # Transform result to match frontend expectations
         return {
             "status": "success",
@@ -188,7 +186,7 @@ def delete_documents(
             result["redis_cleanup"] = redis_cleanup_result
 
             # Update the message to include Redis cleanup info
-            original_message = result.get("message", f"Documents deleted successfully")
+            original_message = result.get("message", "Documents deleted successfully")
             result["message"] = (f"{original_message}. "
                                f"Cleaned up {redis_cleanup_result['total_deleted']} Redis records "
                                f"({redis_cleanup_result['celery_tasks_deleted']} tasks, "
@@ -205,7 +203,7 @@ def delete_documents(
             logger.warning(f"Redis cleanup failed for document {path_or_url} in index {index_name}: {str(redis_error)}")
 
             result["redis_cleanup_error"] = str(redis_error)
-            original_message = result.get("message", f"Documents deleted successfully")
+            original_message = result.get("message", "Documents deleted successfully")
             result["message"] = (f"{original_message}, "
                                f"but Redis cleanup encountered an error: {str(redis_error)}")
 

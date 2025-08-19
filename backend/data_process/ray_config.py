@@ -6,18 +6,21 @@ import os
 import logging
 import ray
 from typing import Dict, Any, Optional
-from .config import config
+from consts.const import RAY_PLASMA_DIRECTORY, RAY_OBJECT_STORE_MEMORY_GB, RAY_TEMP_DIR, RAY_NUM_CPUS
 
 logger = logging.getLogger(__name__)
+
+# Forward declaration variable so runtime references succeed before instantiation
+ray_config: Optional["RayConfig"] = None
 
 
 class RayConfig:
     """Ray configuration manager"""
     
     def __init__(self):
-        self.plasma_directory = config.ray_plasma_directory
-        self.object_store_memory_gb = config.ray_object_store_memory_gb
-        self.temp_dir = config.ray_temp_dir
+        self.plasma_directory = RAY_PLASMA_DIRECTORY
+        self.object_store_memory_gb = RAY_OBJECT_STORE_MEMORY_GB
+        self.temp_dir = RAY_TEMP_DIR
     
     def get_init_params(self, 
                        address: Optional[str] = None,
@@ -82,8 +85,12 @@ class RayConfig:
             
             params = self.get_init_params(**kwargs)
             
-            logger.info("Initializing Ray cluster...")
-            logger.debug(f"Ray configuration parameters:")
+            # Get Ray configuration from environment
+            num_cpus = int(RAY_NUM_CPUS) if RAY_NUM_CPUS else None  # None lets Ray decide
+
+            # Log the attempt to initialize
+            logger.debug("Initializing Ray cluster...")
+            logger.debug("Ray configuration parameters:")
             for key, value in params.items():
                 if key.startswith('_'):
                     logger.debug(f"  {key}: {value}")
@@ -133,7 +140,7 @@ class RayConfig:
             return True
             
         except Exception as e:
-            logger.info(f"Failed to connect to Ray cluster: {str(e)}")
+            logger.info(f"Cannot connect to Ray cluster: {str(e)}")
             return False
     
     def start_local_cluster(self, 
@@ -167,54 +174,36 @@ class RayConfig:
         logger.debug(f"  ObjectStore memory: {self.object_store_memory_gb} GB")
         logger.debug(f"  Temp directory: {self.temp_dir}")
 
+    @classmethod
+    def init_ray_for_worker(cls, address: str = "auto") -> bool:
+        """Initialize Ray connection for Celery Worker (class method wrapper)."""
+        logger.info("Initialize Ray connection for Celery Worker...")
+        ray_config.log_configuration()
+        return ray_config.connect_to_cluster(address)
 
-# Create a global RayConfiguration instance
+    @classmethod
+    def init_ray_for_service(cls,
+                             num_cpus: Optional[int] = None,
+                             dashboard_port: int = 8265,
+                             try_connect_first: bool = True,
+                             include_dashboard: bool = True) -> bool:
+        """Initialize Ray for data processing service (class method wrapper)."""
+        ray_config.log_configuration()
+
+        if try_connect_first:
+            # Try to connect to existing cluster first
+            logger.debug("Trying to connect to existing Ray cluster...")
+            if ray_config.connect_to_cluster("auto"):
+                return True
+            logger.info("Starting local cluster...")
+
+        # Start local cluster
+        return ray_config.start_local_cluster(
+            num_cpus=num_cpus,
+            include_dashboard=include_dashboard,
+            dashboard_port=dashboard_port
+        )
+
+# Create a global RayConfig instance accessible throughout the module
 ray_config = RayConfig()
-
-
-def init_ray_for_worker(address: str = "auto") -> bool:
-    """
-    Initialize Ray connection for Celery Worker
-    
-    Args:
-        address: Ray cluster address
-        
-    Returns:
-        Whether initialization is successful
-    """
-    logger.info("Initialize Ray connection for Celery Worker...")
-    ray_config.log_configuration()
-    
-    return ray_config.connect_to_cluster(address)
-
-
-def init_ray_for_service(num_cpus: Optional[int] = None,
-                        dashboard_port: int = 8265,
-                        try_connect_first: bool = True) -> bool:
-    """
-    Initialize Ray for data processing service
-    
-    Args:
-        num_cpus: Number of CPU cores
-        dashboard_port: Dashboard port
-        try_connect_first: Whether to try connecting to existing cluster first
-        
-    Returns:
-        Whether initialization is successful
-    """
-    ray_config.log_configuration()
-    
-    if try_connect_first:
-        # Try to connect to existing cluster first
-        logger.debug("Trying to connect to existing Ray cluster...")
-        if ray_config.connect_to_cluster("auto"):
-            return True
-        
-        logger.info("Starting local cluster...")
-    
-    # Start local cluster
-    return ray_config.start_local_cluster(
-        num_cpus=num_cpus,
-        dashboard_port=dashboard_port
-    )
     

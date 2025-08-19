@@ -1,3 +1,4 @@
+import re
 import time
 import threading
 from collections import deque
@@ -6,7 +7,7 @@ from typing import Union, Any, Optional, List, Dict, Generator
 from rich.console import Group
 from rich.text import Text
 
-from smolagents.agents import CodeAgent, populate_template, handle_agent_output_types, AgentError, AgentType
+from smolagents.agents import CodeAgent, handle_agent_output_types, AgentError, AgentType
 from smolagents.local_python_executor import fix_final_answer_code
 from smolagents.memory import ActionStep, ToolCall, TaskStep, SystemPromptStep
 from smolagents.models import ChatMessage
@@ -15,6 +16,16 @@ from smolagents.utils import AgentExecutionError, AgentGenerationError, AgentPar
     truncate_content
 
 from ..utils.observer import MessageObserver, ProcessType
+from jinja2 import Template, StrictUndefined
+
+
+def convert_code_format(text):
+    """
+    transform from ```code:python to ```python
+    """
+    pattern = r'```code:(\w+)'
+    replacement = r'```\1'
+    return re.sub(pattern, replacement, text).replace("```<", "```")
 
 
 class CoreAgent(CodeAgent):
@@ -159,8 +170,9 @@ You have been provided with these additional arguments, that you can access usin
         """Adds additional prompting for the managed agent, runs it, and wraps the output.
         This method is called only by a managed agent.
         """
-        full_task = populate_template(self.prompt_templates["managed_agent"]["task"],
-            variables=dict(name=self.name, task=task), )
+        full_task = Template(self.prompt_templates["managed_agent"]["task"], undefined=StrictUndefined).render({
+            "name": self.name, "task": task, **self.state
+        })
         report = self.run(full_task, **kwargs)
 
         # When a sub-agent finishes running, return a marker
@@ -169,8 +181,9 @@ You have been provided with these additional arguments, that you can access usin
         except:
             self.observer.add_message(self.name, ProcessType.AGENT_FINISH, "")
 
-        answer = populate_template(self.prompt_templates["managed_agent"]["report"],
-            variables=dict(name=self.name, final_answer=report))
+        answer = Template(self.prompt_templates["managed_agent"]["report"], undefined=StrictUndefined).render({
+            "name": self.name, "final_answer": report
+        })
         if self.provide_run_summary:
             answer += "\n\nFor more detail, find below a summary of this agent's work:\n<summary_of_work>\n"
             for message in self.write_memory_to_messages(summary_mode=True):
@@ -185,7 +198,7 @@ You have been provided with these additional arguments, that you can access usin
         self.step_number = 1
         while final_answer is None and self.step_number <= max_steps and not self.stop_event.is_set():
             step_start_time = time.time()
-            memory_step = self._create_memory_step(step_start_time, images)
+            memory_step = self._create_action_step(step_start_time, images)
             try:
                 final_answer = self._execute_step(task, memory_step)
 
@@ -194,11 +207,14 @@ You have been provided with these additional arguments, that you can access usin
                 if except_parse_error_pattern in e.message:
                     # When the model does not output code, directly treat the large model content as the final answer
                     final_answer = memory_step.model_output
+                    if isinstance(final_answer, str):
+                        final_answer = convert_code_format(final_answer)
                 else:
                     memory_step.error = e
 
             finally:
                 self._finalize_step(memory_step, step_start_time)
+                self.memory.steps.append(memory_step)
                 yield memory_step
                 self.step_number += 1
 

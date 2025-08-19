@@ -4,7 +4,7 @@ Celery application configuration for data processing tasks
 import os
 import logging
 from celery import Celery
-from .config import config
+from consts.const import REDIS_URL, REDIS_BACKEND_URL, ELASTICSEARCH_SERVICE
 from celery.backends.base import DisabledBackend
 
 # Configure logging
@@ -12,23 +12,20 @@ logger = logging.getLogger("data_process.app")
 
 # Determine package path dynamically
 import_path = 'data_process.tasks'
-logger.info(f"Using import path: {import_path}")
-
-REDIS_URL = config.redis_url
-REDIS_BACKEND_URL = config.redis_backend_url
+logger.debug(f"Using import path: {import_path}")
 
 if not REDIS_URL or not REDIS_BACKEND_URL:
     raise ValueError("FATAL: REDIS_URL or REDIS_BACKEND_URL is not configured. Please check the environment variables in this container.")
 
-logger.info(f"Broker URL from config: {REDIS_URL}")
-logger.info(f"Backend URL from config: {REDIS_BACKEND_URL}")
+logger.debug(f"Broker URL from config: {REDIS_URL}")
+logger.debug(f"Backend URL from config: {REDIS_BACKEND_URL}")
 
 # Create Celery app instance
 app = Celery(
     'nexent',
     broker=REDIS_URL,
     backend=REDIS_BACKEND_URL,
-    elasticsearch_service=os.environ.get('ELASTICSEARCH_SERVICE'),
+    elasticsearch_service=ELASTICSEARCH_SERVICE,
     include=[import_path]
 )
 
@@ -62,8 +59,8 @@ app.conf.update(
     result_backend_always_retry=True,  # Always retry backend operations
     result_backend_max_retries=10,  # Max retries for backend operations
     task_time_limit=3600,      # 1 hour time limit per task
-    worker_prefetch_multiplier=1,  # Don't prefetch tasks, process one at a time
-    worker_max_tasks_per_child=100,  # Restart worker after 100 tasks
+    worker_prefetch_multiplier=4,  # Allow prefetching for better throughput
+    worker_max_tasks_per_child=1000,  # Reduce restart frequency
     # Important for task chains
     task_acks_late=True,       # Tasks are acknowledged after completion
     task_reject_on_worker_lost=True,  # Tasks are rejected if worker is lost

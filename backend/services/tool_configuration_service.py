@@ -1,12 +1,14 @@
-import asyncio
 import importlib
 import inspect
 import json
 import logging
 from typing import Any, List
 from urllib.parse import urljoin
+
 from pydantic_core import PydanticUndefined
-from smolagents import ToolCollection
+from fastmcp import Client
+import jsonref
+from mcpadapt.smolagents_adapter import _sanitize_function_name
 
 from database.agent_db import (
     query_tool_instances_by_id,
@@ -15,7 +17,6 @@ from database.agent_db import (
 )
 from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum
 from database.remote_mcp_db import get_mcp_records_by_tenant
-from services.remote_mcp_service import get_remote_mcp_server_list
 from utils.auth_utils import get_current_user_id
 from fastapi import Header
 
@@ -95,7 +96,8 @@ def get_local_tools() -> List[ToolInfo]:
             source=ToolSourceEnum.LOCAL.value,
             inputs=json.dumps(getattr(tool_class, 'inputs'), ensure_ascii=False),
             output_type=getattr(tool_class, 'output_type'),
-            class_name=tool_class.__name__
+            class_name=tool_class.__name__,
+            usage=None
         )
         tools_info.append(tool_info)
     return tools_info
@@ -115,6 +117,70 @@ def get_local_tools_classes() -> List[type]:
             tools_classes.append(obj)
     return tools_classes
 
+
+# --------------------------------------------------
+# LangChain tools discovery (functions decorated with @tool)
+# --------------------------------------------------
+
+def _build_tool_info_from_langchain(obj) -> ToolInfo:
+    """Convert a LangChain Tool object into our internal ToolInfo model."""
+
+    # Try to infer parameter schema from the underlying callable signature if
+    # available.  LangChain tools usually expose a `.func` attribute pointing
+    # to the original python function.  If not present, we fallback to the
+    # tool instance itself (implements __call__).
+    target_callable = getattr(obj, "func", obj)
+
+    inputs = getattr(obj, "args", {})
+
+    if inputs:
+        for key,value in inputs.items():
+            if "description" not in value:
+                value["description"] = "see the description"
+
+    # Attempt to infer output type from return annotation
+    try:
+        return_schema = inspect.signature(target_callable).return_annotation
+        output_type = python_type_to_json_schema(return_schema)
+    except (TypeError, ValueError):
+        output_type = "string"
+
+    tool_info = ToolInfo(
+        name=getattr(obj, "name", target_callable.__name__),
+        description=getattr(obj, "description", ""),
+        params=[],
+        source=ToolSourceEnum.LANGCHAIN.value,
+        inputs=json.dumps(inputs,ensure_ascii=False),
+        output_type=output_type,
+        class_name=getattr(obj, "name", target_callable.__name__),
+        usage=None,
+    )
+    return tool_info
+
+
+def get_langchain_tools() -> List[ToolInfo]:
+    """Discover LangChain tools in the specified directory.
+
+    We dynamically import every `*.py` file and extract objects that look like
+    LangChain tools (based on presence of `name` & `description`).  Any valid
+    tool is converted to ToolInfo with source = "langchain".
+    """
+    from utils.langchain_utils import discover_langchain_modules
+
+    tools_info: List[ToolInfo] = []
+    # Discover all objects that look like LangChain tools
+    discovered_tools = discover_langchain_modules()
+    
+    # Process discovered tools
+    for obj, filename in discovered_tools:
+        try:
+            tool_info = _build_tool_info_from_langchain(obj)
+            tools_info.append(tool_info)
+        except Exception as e:
+            logger.warning(f"Error processing LangChain tool in {filename}: {e}")
+    
+    return tools_info
+
 async def get_all_mcp_tools(tenant_id: str) -> List[ToolInfo]:
     """
     Get metadata for all tools available from the MCP service
@@ -123,23 +189,33 @@ async def get_all_mcp_tools(tenant_id: str) -> List[ToolInfo]:
         List of ToolInfo objects for MCP tools, or empty list if connection fails
     """
     mcp_info = get_mcp_records_by_tenant(tenant_id=tenant_id)
-    mcp_server_name_list = [record["mcp_name"] for record in mcp_info]
+    tools_info = []
+    for record in mcp_info:
+        # only update connected server
+        if record["status"]:
+            try:
+                tools_info.extend(await get_tool_from_remote_mcp_server(mcp_server_name=record["mcp_name"],
+                                                                    remote_mcp_server=record["mcp_server"]))
+            except Exception as e:
+                logger.error(f"mcp connection error: {str(e)}")
 
-    tools_info = await scan_all_mcp_tools(mcp_server_list=mcp_server_name_list)
+    default_mcp_url = urljoin(config_manager.get_config("NEXENT_MCP_SERVER"), "sse")
+    tools_info.extend(await get_tool_from_remote_mcp_server(mcp_server_name="nexent",
+                                                            remote_mcp_server=default_mcp_url))
     return tools_info
 
 def search_tool_info_impl(agent_id: int, tool_id: int, authorization: str = Header(None)):
     """
     Search for tool configuration information by agent ID and tool ID
-    
+
     Args:
         agent_id: Agent ID
         tool_id: Tool ID
         authorization:
-        
+
     Returns:
         Dictionary containing tool parameters and enabled status
-        
+
     Raises:
         ValueError: If database query fails
     """
@@ -166,13 +242,13 @@ def search_tool_info_impl(agent_id: int, tool_id: int, authorization: str = Head
 def update_tool_info_impl(request: ToolInstanceInfoRequest, authorization: str = Header(None)):
     """
     Update tool configuration information
-    
+
     Args:
         request: ToolInstanceInfoRequest containing tool configuration data
-        
+
     Returns:
         Dictionary containing the updated tool instance
-        
+
     Raises:
         ValueError: If database update fails
     """
@@ -190,71 +266,36 @@ def update_tool_info_impl(request: ToolInstanceInfoRequest, authorization: str =
 
 async def get_tool_from_remote_mcp_server(mcp_server_name: str, remote_mcp_server: str):
     """get the tool information from the remote MCP server, avoid blocking the event loop"""
-    def _get_tools_from_mcp_sync(mcp_url):
-        """get the tool information from the remote MCP server, avoid blocking the event loop"""
-        try:
-            tools_info = []
-            with ToolCollection.from_mcp({"url": mcp_url}) as tool_collection:
-                # iterate all MCP tools
-                for tool_class in tool_collection.tools:
-                    tool_info = ToolInfo(
-                        name=f"remote_{mcp_server_name}_{getattr(tool_class, 'name')}",
-                        description=getattr(tool_class, 'description'),
-                        params=[],
-                        source=ToolSourceEnum.MCP.value,
-                        inputs=str(getattr(tool_class, 'inputs')),
-                        output_type=getattr(tool_class, 'output_type'),
-                        class_name=f"remote_{mcp_server_name}_{getattr(tool_class, 'name')}"
-                    )
+    tools_info = []
+    client = Client(remote_mcp_server, timeout=10)
+    async with client:
+        # List available operations
+        tools = await client.list_tools()
 
-                    tools_info.append(tool_info)
-            return tools_info
-        except Exception as e:
-            logger.error(f"mcp connection error: {str(e)}")
-            return []
+        for tool in tools:
+            input_schema = {
+                k: v
+                for k, v in jsonref.replace_refs(tool.inputSchema).items()
+                if k != "$defs"
+            }
+            # make sure mandatory `description` and `type` is provided for each argument:
+            for k, v in input_schema["properties"].items():
+                if "description" not in v:
+                    input_schema["properties"][k]["description"] = "see tool description"
+                if "type" not in v:
+                    input_schema["properties"][k]["type"] = "string"
 
-    loop = asyncio.get_event_loop()
-    tools_list = await loop.run_in_executor(None, _get_tools_from_mcp_sync, remote_mcp_server)
-    return tools_list
-
-
-async def scan_all_mcp_tools(mcp_server_list: List[str]):
-    """get the tool information from the remote MCP server, avoid blocking the event loop"""
-    def _get_tools_from_nexent_mcp_sync(server_name_list: List[str]):
-        """get the tool information from the remote MCP server, avoid blocking the event loop"""
-        try:
-            tools_info = []
-            mcp_url = urljoin(config_manager.get_config("NEXENT_MCP_SERVER"), "sse")
-            with ToolCollection.from_mcp({"url": mcp_url}) as tool_collection:
-                # iterate all MCP tools
-                for tool_class in tool_collection.tools:
-                    try:
-                        tool_name_split = getattr(tool_class, 'name').split('_')
-                        if tool_name_split[0]=='remote' and tool_name_split[1] not in server_name_list:
-                            continue
-                    except Exception as e:
-                        logging.info(f"split tool name {getattr(tool_class, 'name')} error, detail: {e}")
-                        continue
-
-                    tool_info = ToolInfo(
-                        name=getattr(tool_class, 'name'),
-                        description=getattr(tool_class, 'description'),
-                        params=[],
-                        source=ToolSourceEnum.MCP.value,
-                        inputs=str(getattr(tool_class, 'inputs')),
-                        output_type=getattr(tool_class, 'output_type'),
-                        class_name=getattr(tool_class, 'name')
-                    )
-
-                    tools_info.append(tool_info)
-            return tools_info
-        except Exception as e:
-            logger.error(f"mcp connection error: {str(e)}")
-            return []
-
-    loop = asyncio.get_event_loop()
-    tools_list = await loop.run_in_executor(None, _get_tools_from_nexent_mcp_sync, mcp_server_list)
-    return tools_list
+            sanitized_tool_name = _sanitize_function_name(tool.name)
+            tool_info = ToolInfo(name=sanitized_tool_name,
+                                description=tool.description,
+                                params=[],
+                                source=ToolSourceEnum.MCP.value,
+                                inputs=str(input_schema["properties"]),
+                                output_type="string",
+                                class_name=sanitized_tool_name,
+                                usage=mcp_server_name)
+            tools_info.append(tool_info)
+        return tools_info
 
 async def update_tool_list(tenant_id: str, user_id: str):
     """
@@ -268,6 +309,12 @@ async def update_tool_list(tenant_id: str, user_id: str):
             List of ToolInfo objects containing tool metadata
         """
     local_tools = get_local_tools()
+
+    # Discover LangChain tools (decorated functions) and include them in the
+    # unified tool list.
+    langchain_tools = get_langchain_tools()
+
+
     try:
         mcp_tools = await get_all_mcp_tools(tenant_id)
     except Exception as e:
@@ -277,7 +324,7 @@ async def update_tool_list(tenant_id: str, user_id: str):
     try:
         update_tool_table_from_scan_tool_list(tenant_id=tenant_id,
                                               user_id=user_id,
-                                              tool_list=local_tools+mcp_tools)
+                                              tool_list=local_tools+mcp_tools+langchain_tools)
     except Exception as e:
         logger.error(f"failed to update tool list to PG, detail: {e}")
         raise Exception(f"failed to update tool list to PG, detail: {e}")

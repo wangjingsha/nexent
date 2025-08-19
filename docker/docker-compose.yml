@@ -1,6 +1,5 @@
 x-es-vars: &es-vars
   ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
-  ELASTICSEARCH_API_KEY: ${ELASTICSEARCH_API_KEY:-}
 x-minio-vars: &minio-vars
   MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
   MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
@@ -84,6 +83,9 @@ services:
     restart: always
     ports:
       - "5010:5010"  # Backend service port
+    volumes:
+      - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
+      - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
     environment:
       <<: [*minio-vars, *es-vars]
       skip_proxy: "true"
@@ -131,6 +133,8 @@ services:
       - "5012:5012"
       - "5555:5555"  # Celery Flower port
       - "8265:8265"  # Ray Dashboardport
+    volumes:
+      - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
     environment:
       <<: [*proxy-vars, *es-vars, *minio-vars]
       DOCKER_ENVIRONMENT: "true"
@@ -207,6 +211,36 @@ services:
         mc anonymous set download myadmin/$MINIO_DEFAULT_BUCKET
         wait $$MINIO_PID
       "
+
+  nexent-openssh-server:
+    image: ${OPENSSH_SERVER_IMAGE}
+    container_name: nexent-openssh-server
+    hostname: nexent-openssh-server
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: "Asia/Shanghai"
+      PUBLIC_KEY_FILE: /config/authorized_keys
+      SUDO_ACCESS: "true"
+      PASSWORD_ACCESS: "false"
+      LOG_STDOUT: "true"
+      DOCKER_MODS: linuxserver/mods:universal-package-install
+      INSTALL_PACKAGES: git|make|curl|vim|wget
+    ports:
+      - "2222:2222"  # SSH port
+    volumes:
+      - ${ROOT_DIR}/openssh-server/config:/config
+      - ${ROOT_DIR}/openssh-server/config/custom-cont-init.d:/custom-cont-init.d:ro
+    networks:
+      - nexent
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"  # Maximum size of a single log file
+        max-file: "3"    # Maximum number of log files to keep
+    profiles:
+      - terminal
 
 networks:
   nexent:
