@@ -36,3 +36,6 @@ jobs:
       
     - name: actions-cloc
       uses: maxfie1d/actions-cloc@v1
+
+    - name: Generate Top Contributors
+      uses: ishakhorski/top-contributors-action@v2
